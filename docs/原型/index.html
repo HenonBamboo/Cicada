@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知了 · 界面原型</title>
+<link rel="icon" href="../../assets/logo/logo-small.svg">
+<link rel="stylesheet" href="shared/theme.css">
+<script src="shared/theme.js"></script>
+<style>
+  body { display: grid; place-items: center; min-height: 100vh; padding: 32px 16px; }
+  .wrap { width: min(640px, 100%); }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  header img { width: 48px; height: 48px; }
+  h1 { margin: 0; font-family: var(--font-title, var(--font-ui)); font-size: 1.6rem; font-weight: 500; }
+  header [data-theme-switcher] { margin-left: auto; }
+  p.sub { margin: 0 0 24px; color: var(--text-2); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  a.card { display: flex; gap: 12px; padding: 16px; text-decoration: none; color: inherit; transition: border-color 0.15s; }
+  a.card:hover { border-color: var(--accent); }
+  a.card .icon { width: 22px; height: 22px; color: var(--accent); margin-top: 2px; }
+  a.card b { display: block; font-weight: 500; }
+  a.card small { color: var(--text-2); }
+  .note { margin-top: 20px; font-size: 0.82rem; color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><img src="../../assets/logo/logo.svg" alt=""><h1>知了 · 界面原型</h1><span data-theme-switcher></span></header>
+  <p class="sub">你只管说，它来整理。阶段 0 的可点击原型，数据和模型回复都是模拟的。</p>
+  <div class="grid">
+    <a class="card" href="主界面.html"><span data-icon="message"></span><div><b>主界面</b><small>静息态 / 聚焦态、回复区、热力图、任务与项目</small></div></a>
+    <a class="card" href="便利贴.html"><span data-icon="sticky"></span><div><b>便利贴</b><small>今日任务、项目便利贴、颜色、锁定、托盘菜单</small></div></a>
+    <a class="card" href="快速记录.html"><span data-icon="zap"></span><div><b>快速记录</b><small>全局快捷键唤起的输入条和完成通知</small></div></a>
+    <a class="card" href="设置.html"><span data-icon="settings"></span><div><b>设置</b><small>模型、时间、外观、便利贴、快捷键、数据</small></div></a>
+  </div>
+  <p class="note">右上角的太阳图标可以切换六套主题，选择会在各个原型页面之间保持。</p>
+</div>
+</body>
+</html>

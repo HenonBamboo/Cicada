@@ -1,0 +1,162 @@
+/* 知了 · 主题变量（来源：docs/视觉规范.md 与 docs/原型/shared/theme.css） */
+
+:root,
+[data-theme="light"] {
+  --bg: #f7f8f7;
+  --surface: #ffffff;
+  --surface-2: #f2f4f3;
+  --border: #e6e9e7;
+  --border-strong: #d3d9d6;
+  --text: #1f2a2a;
+  --text-2: #6b7673;
+  --text-3: #9ea7a4;
+  --accent: #16796f;
+  --on-accent: #ffffff;
+  --amber: #b7791f;
+  --danger: #c2410c;
+  --heat-0: #ecefed;
+  /* 浮层与悬停提示的不透明底色 */
+  --pop-bg: #ffffff;
+  --on-danger: #ffffff;
+  --pop-shadow: 0 12px 32px rgba(20, 32, 30, 0.14), 0 2px 6px rgba(20, 32, 30, 0.06);
+  --glass-blur: none;
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --bg: #16191a;
+  --surface: #1e2223;
+  --surface-2: #262b2c;
+  --border: #2c3233;
+  --border-strong: #3a4243;
+  --text: #e8eceb;
+  --text-2: #929c9a;
+  --text-3: #66706e;
+  --accent: #3fb3a2;
+  --on-accent: #0e1a18;
+  --amber: #e0a84a;
+  --danger: #f0845c;
+  --heat-0: #252b2c;
+  /* 浮层与悬停提示的不透明底色 */
+  --pop-bg: #1e2223;
+  --on-danger: #ffffff;
+  --pop-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+[data-theme="paper"] {
+  --bg: #f4efe6;
+  --surface: #fbf8f2;
+  --surface-2: #f0e9dd;
+  --border: #e5dccc;
+  --border-strong: #d6c9b3;
+  --text: #3a332a;
+  --text-2: #857a6b;
+  --text-3: #aca191;
+  --accent: #9a6b2f;
+  --on-accent: #fffbf4;
+  --amber: #b7791f;
+  --danger: #b4441c;
+  --heat-0: #ece4d6;
+  /* 浮层与悬停提示的不透明底色 */
+  --pop-bg: #fbf8f2;
+  --on-danger: #ffffff;
+  --pop-shadow: 0 12px 32px rgba(70, 52, 28, 0.14), 0 2px 6px rgba(70, 52, 28, 0.06);
+  --font-title: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STZhongsong", "SimSun", serif;
+  color-scheme: light;
+}
+
+[data-theme="glass"] {
+  --bg: transparent;
+  --surface: rgba(255, 255, 255, 0.58);
+  --surface-2: rgba(255, 255, 255, 0.42);
+  --border: rgba(30, 50, 46, 0.09);
+  --border-strong: rgba(30, 50, 46, 0.16);
+  --text: #1c2726;
+  --text-2: #56625f;
+  --text-3: #85908d;
+  --accent: #16796f;
+  --on-accent: #ffffff;
+  --amber: #a9691a;
+  --danger: #b93c0a;
+  --heat-0: rgba(30, 50, 46, 0.07);
+  /* 浮层与悬停提示的不透明底色 */
+  --pop-bg: rgba(252, 253, 253, 0.95);
+  --on-danger: #ffffff;
+  --pop-shadow: 0 12px 32px rgba(20, 32, 30, 0.16), 0 2px 6px rgba(20, 32, 30, 0.06);
+  --glass-blur: blur(28px) saturate(1.4);
+  color-scheme: light;
+}
+
+[data-theme="forest"] {
+  --bg: #17211e;
+  --surface: #1e2a26;
+  --surface-2: #25332e;
+  --border: #2c3a35;
+  --border-strong: #3a4b45;
+  --text: #e2ece7;
+  --text-2: #8fa59d;
+  --text-3: #627a71;
+  --accent: #7ccba2;
+  --on-accent: #10201a;
+  --amber: #d9b26a;
+  --danger: #ee8e6a;
+  --heat-0: #24302c;
+  /* 浮层与悬停提示的不透明底色 */
+  --pop-bg: #1e2a26;
+  --on-danger: #ffffff;
+  --pop-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+/* 由强调色推导的颜色：自定义强调色时自动跟随 */
+:root {
+  --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-softer: color-mix(in srgb, var(--accent) 7%, transparent);
+  --amber-soft: color-mix(in srgb, var(--amber) 14%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, transparent);
+  --heat-1: color-mix(in srgb, var(--accent) 26%, var(--heat-0));
+  --heat-2: color-mix(in srgb, var(--accent) 50%, var(--heat-0));
+  --heat-3: color-mix(in srgb, var(--accent) 75%, var(--heat-0));
+  --heat-4: var(--accent);
+
+  --font-ui:
+    "HarmonyOS Sans SC", "MiSans", "Microsoft YaHei UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", monospace;
+  --rs: 1;
+  --r-sm: calc(6px * var(--rs));
+  --r-md: calc(10px * var(--rs));
+  --r-card: calc(14px * var(--rs));
+  --r-input: calc(18px * var(--rs));
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  font-size: 14px;
+}
+
+[data-fontsize="small"] {
+  font-size: 13px;
+}
+[data-fontsize="large"] {
+  font-size: 15.5px;
+}
+[data-radius="small"] {
+  --rs: 0.55;
+}
+[data-radius="large"] {
+  --rs: 1.45;
+}
+
+[data-motion="off"] *,
+[data-motion="off"] *::before,
+[data-motion="off"] *::after {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}

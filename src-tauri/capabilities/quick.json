@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "quick-window",
+  "description": "按窗口职责限制可调用命令",
+  "windows": [
+    "quick"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-desktop-bootstrap",
+    "allow-submit-capture",
+    "allow-hide-quick-capture",
+    "allow-open-main"
+  ]
+}

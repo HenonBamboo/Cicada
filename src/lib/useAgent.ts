@@ -1,0 +1,130 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  cancelPending,
+  confirmPending,
+  discardInbox,
+  listInbox,
+  onAgentDelta,
+  onInboxChanged,
+  retryInbox,
+  submitInput,
+  undoLast,
+} from "./commands";
+import type { InboxItem, Mode, Reply } from "./types";
+import type { ReplyView } from "../components/ReplyCard";
+
+export function useAgent() {
+  const [reply, setReply] = useState<ReplyView | null>(null);
+  const [result, setResult] = useState<Reply | null>(null);
+  const [inbox, setInbox] = useState<InboxItem[]>([]);
+  const [showInbox, setShowInbox] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const active = useRef<string[]>([]);
+  const running = useRef(false);
+  const showError = useCallback((error: unknown) => {
+    setResult(null);
+    setReply({ kind: "message", status: "没有完成", lead: String(error), tone: "danger" });
+  }, []);
+  const refreshInbox = useCallback(() => listInbox().then(setInbox).catch(showError), [showError]);
+  useEffect(() => {
+    void refreshInbox();
+    const off = onInboxChanged(() => void refreshInbox());
+    const deltaOff = onAgentDelta((delta) => {
+      if (!active.current.includes(delta.requestId)) return;
+      setReply((previous) => ({
+        kind: "message",
+        status: "正在整理",
+        streaming: true,
+        lead:
+          (previous?.kind === "message" && previous.streaming ? previous.lead : "") + delta.text,
+      }));
+    });
+    return () => {
+      void off.then((f) => f());
+      void deltaOff.then((f) => f());
+    };
+  }, [refreshInbox]);
+  const run = async (action: () => Promise<Reply>, requestId?: string, pendingId?: string) => {
+    if (running.current) return false;
+    running.current = true;
+    active.current = [requestId, pendingId].filter((id): id is string => !!id);
+    setBusy(true);
+    setShowInbox(false);
+    setResult(null);
+    setReply({ kind: "thinking" });
+    try {
+      const next = await action();
+      setResult(next);
+      setReply({
+        kind: "message",
+        status: next.status ?? undefined,
+        lead: next.lead,
+        tone: next.kind === "error" ? "danger" : undefined,
+        items: next.items.map((item) => ({
+          icon: item.danger ? "minus" : "check",
+          text: item.text,
+          danger: item.danger,
+        })),
+      });
+      return true;
+    } catch (error) {
+      showError(error);
+      return false;
+    } finally {
+      active.current = [];
+      running.current = false;
+      setBusy(false);
+      void refreshInbox();
+    }
+  };
+  return {
+    reply,
+    result,
+    inbox,
+    showInbox,
+    busy,
+    showError,
+    setReply: (view: ReplyView | null) => {
+      if (running.current) return;
+      setResult(null);
+      setShowInbox(false);
+      setReply(view);
+    },
+    openInbox: () => {
+      setResult(null);
+      setShowInbox(true);
+      setReply({
+        kind: "message",
+        status: "收件箱",
+        lead: inbox.length ? "这些输入还在等待处理。" : "收件箱已清空。",
+      });
+    },
+    submit: (text: string, mode: Mode, images: string[]) => {
+      const id = crypto.randomUUID();
+      return run(
+        () =>
+          submitInput(
+            text,
+            mode,
+            images,
+            id,
+            result?.kind === "clarify" || result?.kind === "confirm" ? result.requestId : undefined,
+          ),
+        id,
+        result?.kind === "clarify" || result?.kind === "confirm" ? result.requestId : undefined,
+      );
+    },
+    retry: (item: InboxItem) => run(() => retryInbox(item.id), item.id),
+    discard: async (id: string) => {
+      try {
+        await discardInbox(id);
+        await refreshInbox();
+      } catch (error) {
+        showError(error);
+      }
+    },
+    confirm: () => result && run(() => confirmPending(result.requestId)),
+    cancel: () => result && run(() => cancelPending(result.requestId)),
+    undo: () => run(undoLast),
+  };
+}

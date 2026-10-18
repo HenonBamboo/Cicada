@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "sticky-window",
+  "description": "按窗口职责限制可调用命令",
+  "windows": [
+    "sticky-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-get-desktop-bootstrap",
+    "allow-get-sticky-state",
+    "allow-get-sticky-board",
+    "allow-update-sticky",
+    "allow-close-sticky",
+    "allow-set-sticky-task-done",
+    "allow-open-main",
+    "allow-submit-capture"
+  ]
+}

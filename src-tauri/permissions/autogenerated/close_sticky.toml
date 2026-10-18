@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-sticky"
+description = "Enables the close_sticky command without any pre-configured scope."
+commands.allow = ["close_sticky"]
+
+[[permission]]
+identifier = "deny-close-sticky"
+description = "Denies the close_sticky command without any pre-configured scope."
+commands.deny = ["close_sticky"]

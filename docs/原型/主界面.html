@@ -1,0 +1,1009 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知了 · 主界面原型</title>
+<link rel="icon" href="../../assets/logo/logo-small.svg">
+<link rel="stylesheet" href="shared/theme.css">
+<script src="shared/theme.js"></script>
+<style>
+  .app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  /* 标题栏 */
+  .titlebar { height: 40px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 0 0 14px; user-select: none; }
+  .brand { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; color: var(--text-2); }
+  .brand img { width: 18px; height: 18px; }
+  .tb-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+  .tb-actions .proto-badge { margin-right: 6px; }
+  .tb-sep { width: 1px; height: 16px; background: var(--border); margin: 0 6px; }
+  .win-btn { width: 44px; height: 40px; border: 0; background: transparent; color: var(--text-2); display: grid; place-items: center; }
+  .win-btn:hover { background: var(--surface-2); color: var(--text); }
+  .win-btn.close:hover { background: #E81123; color: #fff; }
+  .win-btn .icon { width: 15px; height: 15px; }
+
+  /* 舞台 */
+  .stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; padding: 0 28px 22px; }
+  .hero { width: 100%; max-width: 700px; flex: none; display: flex; flex-direction: column; align-items: center; padding-top: calc(25vh - 30px); transition: padding-top 0.32s var(--ease); }
+  .focused .hero { padding-top: 6px; }
+
+  .greeting { margin: 0; font-family: var(--font-title, var(--font-ui)); font-weight: 500; font-size: 1.95rem; letter-spacing: 0.01em; text-align: center; transition: font-size 0.32s var(--ease); }
+  .greeting em { font-style: normal; color: var(--accent); }
+  .focused .greeting { font-size: 1.36rem; }
+  .greeting-sub { margin: 8px 0 24px; min-height: 1.6em; font-size: 0.93rem; color: var(--text-2); text-align: center; transition: margin 0.32s var(--ease); }
+  .greeting-sub .nudge { color: var(--amber); }
+  .focused .greeting-sub { margin: 2px 0 12px; }
+
+  /* 输入框 */
+  .composer { width: 100%; padding: 10px 12px 8px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-input); transition: border-color 0.2s, box-shadow 0.2s; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+  .composer:focus-within { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); box-shadow: 0 0 0 4px var(--accent-softer); }
+  .composer-top { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+  .composer-top .hint { font-size: 0.76rem; color: var(--text-3); }
+  .composer textarea { display: block; width: 100%; min-height: 30px; max-height: 150px; padding: 4px 2px; border: 0; outline: 0; resize: none; background: transparent; font-size: 1.07rem; line-height: 1.6; }
+  .composer textarea::placeholder { color: var(--text-3); }
+  .attachments { display: flex; gap: 8px; flex-wrap: wrap; }
+  .attachments:not(:empty) { margin: 6px 0 4px; }
+  .thumb { position: relative; width: 56px; height: 56px; }
+  .thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: var(--r-md); border: 1px solid var(--border); }
+  .thumb button { position: absolute; top: -6px; right: -6px; width: 18px; height: 18px; padding: 0; border: 0; border-radius: 50%; background: var(--text); color: var(--surface); display: grid; place-items: center; }
+  .thumb button .icon { width: 11px; height: 11px; }
+  .composer-bottom { display: flex; align-items: center; gap: 4px; }
+  .composer-bottom .kbd { margin-left: auto; margin-right: 6px; font-size: 0.76rem; color: var(--text-3); }
+  .send { width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; transition: background 0.2s, color 0.2s, transform 0.12s; }
+  .send:active { transform: scale(0.94); }
+  .send:disabled { background: var(--surface-2); color: var(--text-3); cursor: default; }
+
+  /* 静息态摘要 */
+  .summary { margin-top: 20px; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 22px; font-size: 0.9rem; color: var(--text-2); transition: opacity 0.2s; }
+  .summary b { color: var(--text); font-weight: 500; }
+  .summary .dim { color: var(--text-3); }
+  .focused .summary { display: none; }
+
+  /* 示例（原型用） */
+  .examples { display: none; width: 100%; margin-top: 10px; flex-wrap: nowrap; gap: 6px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 90%, transparent); }
+  .examples::-webkit-scrollbar { display: none; }
+  .ex, .examples .lbl { flex: none; }
+  .focused .examples.show { display: flex; }
+  .examples .lbl { font-size: 0.76rem; color: var(--text-3); align-self: center; margin-right: 2px; }
+  .ex { height: 26px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 0.82rem; transition: border-color 0.15s, color 0.15s; }
+  .ex:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* 回复区 */
+  .reply { width: 100%; margin-top: 10px; padding: 12px 14px 12px 16px; max-height: 34vh; overflow: auto; animation: rise 0.22s var(--ease); }
+  .reply.danger { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
+  .reply-head { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-3); }
+  .reply-head img { width: 16px; height: 16px; }
+  .reply-head .icon-btn { margin-left: auto; width: 24px; height: 24px; }
+  .reply-body { margin-top: 4px; font-size: 0.97rem; }
+  .reply-body p { margin: 0; }
+  .reply-list { list-style: none; margin: 8px 0 0; padding: 0; }
+  .reply-list li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+  .reply-list li .icon { color: var(--text-3); }
+  .reply-list li.del { color: var(--text-2); text-decoration: line-through; text-decoration-color: var(--danger); }
+  .reply-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .reply-actions .tip { font-size: 0.78rem; color: var(--text-3); margin-left: 4px; }
+  .typing { display: inline-flex; gap: 4px; margin-left: 2px; }
+  .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--text-3); animation: blink 1s infinite; }
+  .typing i:nth-child(2) { animation-delay: 0.15s; }
+  .typing i:nth-child(3) { animation-delay: 0.3s; }
+  .caret::after { content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 1px; vertical-align: -2px; background: var(--accent); animation: blink 0.9s steps(1) infinite; }
+  .fade-in { animation: rise 0.25s var(--ease) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes blink { 50% { opacity: 0.25; } }
+
+  /* 看板 */
+  .board { width: 100%; max-width: 1120px; flex: 1; min-height: 0; margin-top: 14px; display: flex; flex-direction: column; gap: 12px; opacity: 0; visibility: hidden; transform: translateY(20px); transition: opacity 0.32s var(--ease), transform 0.32s var(--ease), visibility 0s linear 0.32s; }
+  .focused .board { opacity: 1; visibility: visible; transform: none; transition: opacity 0.36s var(--ease) 0.06s, transform 0.36s var(--ease) 0.06s, visibility 0s; }
+
+  /* 热力图 */
+  .heat { flex: none; padding: 12px 16px 12px; display: flex; gap: 24px; align-items: stretch; }
+  .heat-side { flex: none; width: 190px; display: flex; flex-direction: column; justify-content: space-between; }
+  .heat-side .big { font-size: 1.6rem; font-weight: 500; line-height: 1.2; font-family: var(--font-mono); }
+  .heat-side .cap { font-size: 0.8rem; color: var(--text-2); }
+  .heat-side .cap b { color: var(--accent); font-weight: 500; }
+  .heat-main { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-end; overflow: hidden; }
+  .heat-months, .heat-grid { display: grid; grid-auto-flow: column; grid-auto-columns: 10px; gap: 3px; }
+  .heat-months { grid-template-rows: 14px; margin-bottom: 4px; font-size: 0.7rem; color: var(--text-3); line-height: 14px; }
+  .heat-months span { white-space: nowrap; }
+  .heat-grid { grid-template-rows: repeat(7, 10px); }
+  .hc { width: 10px; height: 10px; border-radius: 2.5px; background: var(--heat-0); cursor: pointer; }
+  .hc[data-l="1"] { background: var(--heat-1); }
+  .hc[data-l="2"] { background: var(--heat-2); }
+  .hc[data-l="3"] { background: var(--heat-3); }
+  .hc[data-l="4"] { background: var(--heat-4); }
+  .hc.future { background: transparent; cursor: default; }
+  .hc.today { outline: 1.5px solid var(--text-2); outline-offset: 1px; }
+  .hc:not(.future):hover { outline: 1.5px solid var(--text); outline-offset: 1px; }
+  .heat-foot { display: flex; align-items: center; gap: 4px; font-size: 0.72rem; color: var(--text-3); }
+  .heat-foot .hc { cursor: default; }
+  .heat-foot .hc:hover { outline: 0; }
+  .heat-foot .btn { height: 24px; padding: 0 8px; margin-left: auto; font-size: 0.78rem; }
+  .heat-tip { position: fixed; z-index: 100; pointer-events: none; padding: 6px 10px; border-radius: var(--r-sm); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop-shadow); font-size: 0.8rem; white-space: nowrap; opacity: 0; transition: opacity 0.12s; }
+  [data-theme="glass"] .heat-tip { background: rgba(252, 253, 253, 0.95); }
+  .heat-tip.show { opacity: 1; }
+  .heat-tip .n { font-family: var(--font-mono); color: var(--accent); }
+
+  /* 面板 */
+  .panels { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1.12fr; gap: 12px; }
+  .panel { min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .panel-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--border); }
+  .panel-title { font-family: var(--font-title, var(--font-ui)); font-size: 1.02rem; font-weight: 500; }
+  .panel-meta { font-size: 0.8rem; color: var(--text-3); }
+  .panel-head .seg { margin-left: auto; }
+  .panel-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 8px 12px; }
+  .sec { display: flex; align-items: center; gap: 6px; padding: 10px 8px 4px; font-size: 0.78rem; color: var(--text-3); user-select: none; }
+  .sec .n { font-family: var(--font-mono); }
+  .sec.toggle { cursor: pointer; }
+  .sec.toggle .icon { transition: transform 0.2s var(--ease); }
+  .sec.toggle.collapsed .icon { transform: rotate(-90deg); }
+  .empty { padding: 18px 8px; text-align: center; font-size: 0.86rem; color: var(--text-3); }
+
+  .task { display: flex; align-items: flex-start; gap: 10px; padding: 7px 8px; border-radius: var(--r-md); }
+  .task .check { margin-top: 3px; }
+  .task-main { flex: 1; min-width: 0; }
+  .task-title { font-size: 0.96rem; transition: color 0.2s; }
+  .is-done .task-title { color: var(--text-3); text-decoration: line-through; text-decoration-color: var(--text-3); }
+  .task-meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 3px; }
+  .task-meta:empty { display: none; }
+  .task-meta .icon { width: 11px; height: 11px; }
+  .task.upcoming .dot { width: 18px; height: 18px; flex: none; margin-top: 3px; display: grid; place-items: center; color: var(--text-3); }
+  .task.upcoming .task-title { color: var(--text-2); }
+  .flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { 0%, 25% { background: var(--accent-soft); } 100% { background: transparent; } }
+  .leaving { animation: leave 0.25s var(--ease) forwards; }
+  @keyframes leave { to { opacity: 0; transform: translateX(-6px); } }
+
+  /* 项目：文件夹视图 */
+  .proj { margin-top: 4px; }
+  .prow { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 4px 8px; border-radius: var(--r-md); }
+  .prow .tg { width: 18px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--text-3); display: grid; place-items: center; border-radius: 4px; flex: none; }
+  .prow .tg:hover { background: var(--surface-2); color: var(--text); }
+  .prow .tg .icon { width: 14px; height: 14px; transition: transform 0.2s var(--ease); }
+  .collapsed > .prow .tg .icon { transform: rotate(-90deg); }
+  .prow .spacer { width: 18px; flex: none; }
+  .prow .check { width: 16px; height: 16px; }
+  .prow .check svg { inset: 1.5px; width: 10px; height: 10px; }
+  .prow .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prow.done .t { color: var(--text-3); text-decoration: line-through; }
+  .prow.l1 .t { font-weight: 500; }
+  .prow.l2 { padding-left: 32px; }
+  .prow.l3 { padding-left: 58px; font-size: 0.93rem; }
+  .pkids { overflow: hidden; }
+  .collapsed > .pkids { display: none; }
+  .prog { display: flex; align-items: center; gap: 8px; flex: none; font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-3); }
+  .bar { width: 52px; height: 4px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.4s var(--ease); }
+  .archived .prow { opacity: 0.65; }
+
+  /* 项目：树状视图 */
+  .tree { padding: 8px 4px 4px; }
+  .tproj + .tproj { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--border); }
+  .tn { display: flex; align-items: center; }
+  .tbox { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); font-size: 0.86rem; white-space: nowrap; }
+  [data-theme="glass"] .tbox { background: rgba(255, 255, 255, 0.55); }
+  .tbox.root { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-weight: 500; font-size: 0.93rem; }
+  .tbox.done { color: var(--text-3); }
+  .tbox.done .icon { color: var(--accent); width: 13px; height: 13px; }
+  .tbox .p { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-3); }
+  .tkids { position: relative; display: flex; flex-direction: column; gap: 6px; padding-left: 16px; }
+  .tkids::before { content: ""; position: absolute; left: 0; top: 50%; width: 16px; border-top: 1px solid var(--border-strong); }
+  .tkids > .tn { position: relative; padding-left: 16px; }
+  .tkids > .tn::before { content: ""; position: absolute; left: 0; top: -3px; bottom: -3px; border-left: 1px solid var(--border-strong); }
+  .tkids > .tn:first-child::before { top: 50%; }
+  .tkids > .tn:last-child::before { bottom: 50%; }
+  .tkids > .tn:only-child::before { display: none; }
+  .tkids > .tn::after { content: ""; position: absolute; left: 0; top: 50%; width: 16px; border-top: 1px solid var(--border-strong); }
+
+  @media (max-width: 900px) {
+    .heat-side { display: none; }
+  }
+  @media (max-width: 700px) {
+    .panels { grid-template-columns: 1fr; overflow: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="titlebar">
+    <div class="brand"><img src="../../assets/logo/logo-small.svg" alt="">知了</div>
+    <div class="tb-actions">
+      <span class="proto-badge">原型</span>
+      <a class="icon-btn" href="快速记录.html" title="快速记录（Ctrl+Alt+Space）" data-icon="zap"></a>
+      <a class="icon-btn" href="便利贴.html" title="收成便利贴" data-icon="sticky"></a>
+      <a class="icon-btn" href="设置.html" title="设置" data-icon="settings"></a>
+      <span data-theme-switcher></span>
+      <span class="tb-sep"></span>
+      <button class="win-btn" title="最小化" data-icon="minus"></button>
+      <button class="win-btn" title="最大化" data-icon="square"></button>
+      <button class="win-btn close" title="关闭到托盘" data-icon="x"></button>
+    </div>
+  </header>
+
+  <main class="stage" id="stage">
+    <section class="hero" id="hero">
+      <h1 class="greeting" id="greeting"></h1>
+      <p class="greeting-sub" id="greetingSub"></p>
+
+      <div class="composer" id="composer">
+        <div class="composer-top">
+          <div class="seg" id="modeSeg" role="tablist" aria-label="输入模式">
+            <button data-mode="task" class="on">任务</button>
+            <button data-mode="project">项目</button>
+          </div>
+          <span class="hint">Tab 切换</span>
+        </div>
+        <div class="attachments" id="attachments"></div>
+        <textarea id="input" rows="1" placeholder=""></textarea>
+        <div class="composer-bottom">
+          <button class="icon-btn" id="attachBtn" title="添加图片（也可以直接 Ctrl+V 粘贴截图）" data-icon="image"></button>
+          <input type="file" id="fileInput" accept="image/*" multiple hidden>
+          <span class="kbd">Enter 发送 · Shift+Enter 换行</span>
+          <button class="send" id="sendBtn" title="发送" disabled data-icon="arrow-up"></button>
+        </div>
+      </div>
+
+      <div class="summary" id="summary"></div>
+      <div class="examples" id="examples"></div>
+      <div id="replySlot" style="width:100%"></div>
+    </section>
+
+    <section class="board" id="board" aria-label="任务与项目">
+      <div class="card heat" id="heat">
+        <div class="heat-side">
+          <div>
+            <div class="big" id="heatTotal">0</div>
+            <div class="cap">近一年完成的事 · <span id="heatStreak"></span></div>
+          </div>
+          <div class="heat-foot">少
+            <span class="hc"></span><span class="hc" data-l="1"></span><span class="hc" data-l="2"></span><span class="hc" data-l="3"></span><span class="hc" data-l="4"></span>多
+            <button class="btn" id="reportBtn" data-icon="file"> 报告</button>
+          </div>
+        </div>
+        <div class="heat-main">
+          <div class="heat-months" id="heatMonths"></div>
+          <div class="heat-grid" id="heatGrid"></div>
+        </div>
+      </div>
+
+      <div class="panels">
+        <div class="card panel">
+          <div class="panel-head">
+            <span class="panel-title">任务</span>
+            <span class="panel-meta" id="taskMeta"></span>
+          </div>
+          <div class="panel-body" id="taskBody"></div>
+        </div>
+        <div class="card panel">
+          <div class="panel-head">
+            <span class="panel-title">项目</span>
+            <span class="panel-meta" id="projMeta"></span>
+            <div class="seg" id="viewSeg">
+              <button data-view="folder" class="on" title="文件夹视图" data-icon="folder"></button>
+              <button data-view="tree" title="树状视图" data-icon="tree"></button>
+            </div>
+          </div>
+          <div class="panel-body" id="projBody"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="heat-tip" id="tip"></div>
+
+<script>
+(function () {
+  const { icon, CHECK_SVG } = window.Cicada;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const LOGO = '<img src="../../assets/logo/logo-small.svg" alt="">';
+
+  /* ---------- 模拟数据 ---------- */
+  let seq = 100;
+  const nid = () => "id" + seq++;
+
+  const state = {
+    mode: "task",
+    focused: false,
+    view: "folder",
+    images: [],
+    pending: null,
+    lastAction: null,
+    collapsed: { upcoming: true, archived: true },
+    tasks: [
+      { id: "t1", title: "整理本周会议纪要", kind: "today" },
+      { id: "t2", title: "给「知了」做快速记录原型", kind: "today", link: "n13", linkName: "知了 › 阶段 0" },
+      { id: "t3", title: "下午 3 点产品评审会议", kind: "today", remind: "15:00" },
+      { id: "t4", title: "准备周一例会的会议材料", kind: "today", due: "周一" },
+      { id: "t5", title: "回复王老师的邮件", kind: "legacy", delay: 3 },
+      { id: "t6", title: "预约体检", kind: "legacy", delay: 9 },
+      { id: "t7", title: "跑步 30 分钟", kind: "today", recur: "每天", done: true },
+      { id: "t8", title: "买猫粮", kind: "today", done: true },
+      { id: "t9", title: "交季度个税申报", kind: "upcoming", date: "10 月 20 日", remind: "09:00" },
+      { id: "t10", title: "妈妈生日，订蛋糕", kind: "upcoming", date: "10 月 24 日" },
+    ],
+    projects: [
+      { id: "p1", title: "知了", status: "active", kids: [
+        { id: "n1", title: "阶段 0 · 界面原型", kids: [
+          { id: "n11", title: "主界面", done: true },
+          { id: "n12", title: "便利贴", done: true },
+          { id: "n13", title: "快速记录" },
+          { id: "n14", title: "设置页" },
+        ] },
+        { id: "n2", title: "阶段 1 · 项目骨架", kids: [
+          { id: "n21", title: "Tauri 模板" },
+          { id: "n22", title: "主题系统" },
+          { id: "n23", title: "数据库迁移" },
+        ] },
+        { id: "n3", title: "阶段 2 · 主界面" },
+      ] },
+      { id: "p2", title: "读书计划 2026", status: "active", kids: [
+        { id: "n4", title: "《置身事内》", kids: [
+          { id: "n41", title: "第 1–3 章", done: true },
+          { id: "n42", title: "第 4 章" },
+          { id: "n43", title: "读书笔记", done: true },
+        ] },
+        { id: "n5", title: "《原则》", done: true, kids: [
+          { id: "n51", title: "通读", done: true },
+          { id: "n52", title: "摘录", done: true },
+        ] },
+        { id: "n6", title: "《人类简史》" },
+      ] },
+      { id: "p3", title: "搬家", status: "archived", done: true, kids: [
+        { id: "n71", title: "找房", done: true },
+        { id: "n72", title: "打包", done: true },
+      ] },
+    ],
+  };
+
+  const EXAMPLES = {
+    task: ["明天下午 3 点提醒我交周报", "删除会议", "回复王老师的邮件做完了", "这周完成了什么？", "撤销刚才的操作", "今天天气怎么样？", "（模拟断网）记一下周末去看展"],
+    project: ["给「知了」阶段 1 加一项：配置 ESLint", "「置身事内」第 4 章读完了", "把「数据库迁移」安排到今天", "在「主题系统」下面再加一项：深色适配", "下午 5 点提醒我取快递"],
+  };
+  const PLACEHOLDER = {
+    task: "说点什么，比如：明天下午三点提醒我交周报",
+    project: "比如：给「知了」加一个阶段：打包发布",
+  };
+
+  /* ---------- 工具函数 ---------- */
+  function walk(list, fn, depth = 1, parent = null) {
+    for (const n of list) {
+      if (fn(n, depth, parent) === false) return false;
+      if (n.kids && walk(n.kids, fn, depth + 1, n) === false) return false;
+    }
+  }
+  function findNode(pred) {
+    let hit = null;
+    walk(state.projects, (n, d, p) => { if (pred(n, d, p)) { hit = { node: n, depth: d, parent: p }; return false; } });
+    return hit;
+  }
+  function progress(n) {
+    if (!n.kids || !n.kids.length) return null;
+    const leaves = n.kids.length;
+    const done = n.kids.filter((k) => k.done).length;
+    return { done, total: leaves };
+  }
+  const todayTasks = () => state.tasks.filter((t) => t.kind === "today" || t.kind === "legacy");
+  const openCount = () => todayTasks().filter((t) => !t.done).length;
+
+  /* ---------- 问候语 ---------- */
+  function period(h) {
+    if (h < 5) return "夜深了";
+    if (h < 9) return "早上好";
+    if (h < 12) return "上午好";
+    if (h < 14) return "中午好";
+    if (h < 18) return "下午好";
+    if (h < 23) return "晚上好";
+    return "夜深了";
+  }
+  function renderGreeting() {
+    const now = new Date();
+    const p = period(now.getHours());
+    const n = openCount();
+    $("greeting").innerHTML = n
+      ? esc(p) + "，今天还剩 <em>" + n + "</em> 件事"
+      : esc(p) + "，今天的事都办完了";
+    const stale = state.tasks.find((t) => t.kind === "legacy" && !t.done && t.delay >= 7);
+    const week = "日一二三四五六"[now.getDay()];
+    const date = (now.getMonth() + 1) + " 月 " + now.getDate() + " 日 · 周" + week;
+    $("greetingSub").innerHTML = stale
+      ? date + ' · <span class="nudge">「' + esc(stale.title) + "」已经拖了 " + stale.delay + " 天，还要做吗？</span>"
+      : n ? date : date + " · 好好休息";
+  }
+
+  function renderSummary() {
+    const today = state.tasks.filter((t) => t.kind === "today" && !t.done).length;
+    const legacy = state.tasks.filter((t) => t.kind === "legacy" && !t.done).length;
+    const done = todayTasks().filter((t) => t.done).length;
+    const projects = state.projects.filter((p) => p.status === "active").length;
+    $("summary").innerHTML =
+      "<span>今日待办 <b>" + today + "</b></span>" +
+      "<span>遗留 <b>" + legacy + "</b></span>" +
+      "<span>已完成 <b>" + done + "</b></span>" +
+      "<span>进行中的项目 <b>" + projects + "</b></span>" +
+      '<span class="dim">点击输入框展开 · Ctrl+Alt+Space 随时记录</span>';
+  }
+
+  /* ---------- 任务区 ---------- */
+  function taskMeta(t) {
+    const m = [];
+    if (t.kind === "legacy") m.push('<span class="chip ' + (t.delay >= 7 ? "danger" : "amber") + '">已延期 ' + t.delay + " 天</span>");
+    if (t.date) m.push('<span class="chip">' + icon("calendar") + t.date + "</span>");
+    if (t.remind) m.push('<span class="chip">' + icon("bell") + t.remind + "</span>");
+    if (t.due) m.push('<span class="chip amber">' + icon("flag") + "截止 " + t.due + "</span>");
+    if (t.recur) m.push('<span class="chip">' + icon("repeat") + t.recur + "</span>");
+    if (t.linkName) m.push('<span class="chip accent">' + icon("link") + esc(t.linkName) + "</span>");
+    return m.join("");
+  }
+  function taskRow(t) {
+    if (t.kind === "upcoming") {
+      return '<div class="task upcoming" data-id="' + t.id + '"><span class="dot">' + icon("clock") + '</span><div class="task-main"><div class="task-title">' + esc(t.title) + '</div><div class="task-meta">' + taskMeta(t) + "</div></div></div>";
+    }
+    return '<div class="task' + (t.done ? " is-done" : "") + '" data-id="' + t.id + '">' +
+      '<button class="check" data-check="' + t.id + '" aria-label="' + (t.done ? "取消完成" : "标记完成") + '">' + CHECK_SVG + "</button>" +
+      '<div class="task-main"><div class="task-title">' + esc(t.title) + '</div><div class="task-meta">' + taskMeta(t) + "</div></div></div>";
+  }
+  function section(key, label, items, opts = {}) {
+    if (!items.length && !opts.always) return "";
+    const collapsible = opts.collapsible;
+    const collapsed = collapsible && state.collapsed[key];
+    let h = '<div class="sec' + (collapsible ? " toggle" + (collapsed ? " collapsed" : "") : "") + '" ' + (collapsible ? 'data-sec="' + key + '"' : "") + ">" +
+      (collapsible ? icon("chevron-down") : "") + label + ' <span class="n">' + items.length + "</span></div>";
+    if (!collapsed) h += items.length ? items.map(taskRow).join("") : '<div class="empty">' + opts.empty + "</div>";
+    return h;
+  }
+  function renderTasks() {
+    const today = state.tasks.filter((t) => t.kind === "today" && !t.done);
+    const legacy = state.tasks.filter((t) => t.kind === "legacy" && !t.done);
+    const done = todayTasks().filter((t) => t.done);
+    const upcoming = state.tasks.filter((t) => t.kind === "upcoming");
+    $("taskBody").innerHTML =
+      section("today", "今日", today, { always: true, empty: "今天的事都办完了" }) +
+      section("legacy", "遗留", legacy) +
+      section("done", "已完成", done) +
+      section("upcoming", "之后", upcoming, { collapsible: true });
+    $("taskMeta").textContent = done.length + " / " + (today.length + legacy.length + done.length) + " 已完成";
+  }
+
+  /* ---------- 项目区 ---------- */
+  function folderNode(n, depth) {
+    const pr = progress(n);
+    const hasKids = n.kids && n.kids.length;
+    const collapsed = state.collapsed[n.id];
+    let row = '<div class="prow l' + depth + (n.done ? " done" : "") + '" data-node="' + n.id + '">' +
+      (hasKids ? '<button class="tg" data-toggle="' + n.id + '" aria-label="展开或折叠">' + icon("chevron-down") + "</button>" : '<span class="spacer"></span>') +
+      '<span class="check readonly' + (n.done ? " on" : "") + '">' + CHECK_SVG + "</span>" +
+      '<span class="t">' + esc(n.title) + "</span>";
+    if (pr) row += '<span class="prog">' + pr.done + "/" + pr.total + '<span class="bar"><span style="width:' + (pr.done / pr.total) * 100 + '%"></span></span></span>';
+    row += "</div>";
+    const kids = hasKids ? '<div class="pkids">' + n.kids.map((k) => folderNode(k, depth + 1)).join("") + "</div>" : "";
+    return '<div class="pnode' + (collapsed ? " collapsed" : "") + '">' + row + kids + "</div>";
+  }
+  function treeNode(n, root) {
+    const pr = progress(n);
+    const box = '<span class="tbox' + (root ? " root" : "") + (n.done && !root ? " done" : "") + '" data-node="' + n.id + '">' +
+      (n.done && !root ? icon("check") : "") + esc(n.title) + (pr ? ' <span class="p">' + pr.done + "/" + pr.total + "</span>" : "") + "</span>";
+    const kids = n.kids && n.kids.length ? '<div class="tkids">' + n.kids.map((k) => treeNode(k, false)).join("") + "</div>" : "";
+    return '<div class="tn">' + box + kids + "</div>";
+  }
+  function renderProjects() {
+    const active = state.projects.filter((p) => p.status !== "archived");
+    const archived = state.projects.filter((p) => p.status === "archived");
+    let h = "";
+    if (state.view === "folder") {
+      h = active.map((p) => '<div class="proj">' + folderNode(p, 1) + "</div>").join("");
+      if (archived.length) {
+        const c = state.collapsed.archived;
+        h += '<div class="sec toggle' + (c ? " collapsed" : "") + '" data-sec="archived">' + icon("chevron-down") + '已归档 <span class="n">' + archived.length + "</span></div>";
+        if (!c) h += archived.map((p) => '<div class="proj archived">' + folderNode(p, 1) + "</div>").join("");
+      }
+    } else {
+      h = '<div class="tree">' + active.map((p) => '<div class="tproj">' + treeNode(p, true) + "</div>").join("") + "</div>";
+    }
+    $("projBody").innerHTML = h;
+    $("projMeta").textContent = active.length + " 个进行中";
+  }
+
+  /* ---------- 热力图 ---------- */
+  const heat = { days: [], todayIndex: 0 };
+  function rand(seed) { let s = seed; return () => (s = (s * 1664525 + 1013904223) % 4294967296) / 4294967296; }
+  function buildHeat() {
+    const r = rand(20261017);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const wd = (today.getDay() + 6) % 7; // 周一 = 0
+    const start = new Date(today); start.setDate(today.getDate() - wd - 52 * 7);
+    for (let i = 0; i < 53 * 7; i++) {
+      const d = new Date(start); d.setDate(start.getDate() + i);
+      const future = d > today;
+      const weekend = d.getDay() === 0 || d.getDay() === 6;
+      const ramp = 0.45 + 0.55 * (i / (53 * 7));
+      let v = 0;
+      if (!future) {
+        const x = r();
+        v = x < 0.22 ? 0 : Math.round((weekend ? 1.4 : 3) * ramp * (0.3 + r() * 1.5));
+      }
+      const tasks = Math.max(0, Math.round(v * 0.7));
+      heat.days.push({ date: d, future, tasks, nodes: v - tasks });
+      if (+d === +today) heat.todayIndex = i;
+    }
+    syncTodayHeat();
+  }
+  function syncTodayHeat() {
+    const t = heat.days[heat.todayIndex];
+    t.tasks = todayTasks().filter((x) => x.done).length;
+    let nodes = 0; walk(state.projects, (n) => { if (n.doneToday) nodes++; });
+    t.nodes = 2 + nodes;
+  }
+  const level = (v) => (v === 0 ? 0 : v <= 2 ? 1 : v <= 4 ? 2 : v <= 6 ? 3 : 4);
+  function renderHeat() {
+    syncTodayHeat();
+    const grid = heat.days.map((d, i) => {
+      if (d.future) return '<span class="hc future"></span>';
+      const v = d.tasks + d.nodes;
+      return '<span class="hc' + (i === heat.todayIndex ? " today" : "") + '" data-i="' + i + '" data-l="' + level(v) + '"></span>';
+    }).join("");
+    $("heatGrid").innerHTML = grid;
+    let months = "", lastM = -1, span = 0;
+    const cols = [];
+    for (let c = 0; c < 53; c++) {
+      const m = heat.days[c * 7].date.getMonth();
+      if (m !== lastM) { cols.push({ m, span: 1 }); lastM = m; } else cols[cols.length - 1].span++;
+    }
+    months = cols.map((c) => '<span style="grid-column: span ' + c.span + '">' + (c.span >= 3 ? c.m + 1 + "月" : "") + "</span>").join("");
+    $("heatMonths").innerHTML = months;
+    const total = heat.days.reduce((s, d) => s + d.tasks + d.nodes, 0);
+    $("heatTotal").textContent = total;
+    let streak = 0;
+    for (let i = heat.todayIndex; i >= 0 && heat.days[i].tasks + heat.days[i].nodes > 0; i--) streak++;
+    $("heatStreak").innerHTML = "连续 <b>" + streak + "</b> 天";
+  }
+  const fmtDay = (d) => (d.getMonth() + 1) + " 月 " + d.getDate() + " 日";
+
+  /* ---------- 回复区 ---------- */
+  let replyTimer = null;
+  function closeReply() {
+    $("replySlot").innerHTML = "";
+    state.pending = null;
+    updateExamples();
+  }
+  function thinking() {
+    $("replySlot").innerHTML = '<div class="card reply"><div class="reply-head">' + LOGO + '知了 · 正在整理<span class="typing"><i></i><i></i><i></i></span></div></div>';
+    updateExamples();
+  }
+  /* reply: { tone, lead, html, actions: [{label, cls, icon, run}], tip } */
+  function showReply(r) {
+    clearInterval(replyTimer);
+    const actions = r.actions || [];
+    $("replySlot").innerHTML =
+      '<div class="card reply' + (r.tone === "danger" ? " danger" : "") + '">' +
+      '<div class="reply-head">' + LOGO + "知了" + (r.status ? " · " + r.status : "") +
+      '<button class="icon-btn" data-close-reply title="关闭（Esc）">' + icon("x") + "</button></div>" +
+      '<div class="reply-body"><p class="lead caret"></p><div class="rest"></div></div></div>';
+    const lead = $("replySlot").querySelector(".lead");
+    const rest = $("replySlot").querySelector(".rest");
+    const text = r.lead;
+    const t0 = performance.now();
+    replyTimer = setInterval(() => {
+      const i = Math.ceil((performance.now() - t0) / 9);
+      lead.textContent = text.slice(0, i);
+      if (i >= text.length) {
+        clearInterval(replyTimer);
+        lead.classList.remove("caret");
+        let h = r.html || "";
+        if (actions.length || r.tip) {
+          h += '<div class="reply-actions">' + actions.map((a, k) => '<button class="btn ' + (a.cls || "") + '" data-act="' + k + '">' + (a.icon ? icon(a.icon) : "") + a.label + "</button>").join("") +
+            (r.tip ? '<span class="tip">' + r.tip + "</span>" : "") + "</div>";
+        }
+        rest.innerHTML = h;
+        rest.classList.add("fade-in");
+        rest.querySelectorAll("[data-act]").forEach((b) => b.addEventListener("click", () => actions[+b.dataset.act].run()));
+      }
+    }, 16);
+    updateExamples();
+  }
+  const li = (ic, html, cls) => '<li class="' + (cls || "") + '">' + icon(ic) + "<span>" + html + "</span></li>";
+  const undoAction = { label: "撤销", icon: "undo", cls: "ghost", run: () => send("撤销刚才的操作", true) };
+
+  function flash(id) {
+    requestAnimationFrame(() => {
+      const el = document.querySelector('[data-id="' + id + '"], [data-node="' + id + '"]');
+      if (!el) return;
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+    });
+  }
+  function renderAll() { renderGreeting(); renderSummary(); renderTasks(); renderProjects(); renderHeat(); }
+
+  /* ---------- 模拟大模型 ---------- */
+  const CN = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10, 十一: 11, 十二: 12 };
+  function parseTime(t) {
+    const m = t.match(/(上午|早上|中午|下午|晚上)?\s*([0-9]{1,2}|十[一二]?|[一二两三四五六七八九十])\s*点(半)?/);
+    if (!m) return null;
+    let h = /^\d+$/.test(m[2]) ? +m[2] : CN[m[2]];
+    if ((m[1] === "下午" || m[1] === "晚上") && h < 12) h += 12;
+    return String(h).padStart(2, "0") + ":" + (m[3] ? "30" : "00");
+  }
+  function cleanTitle(t) {
+    let s = t.replace(/^（模拟断网）/, "");
+    const k = s.indexOf("提醒我");
+    if (k >= 0) s = s.slice(k + 3);
+    s = s.replace(/^(帮我|请|记一下|记得|添加|加一个|新建一个?任务)[：:，,\s]*/, "")
+      .replace(/(今天|明天|后天)/g, "")
+      .replace(/(上午|早上|中午|下午|晚上)?\s*([0-9]{1,2}|十[一二]?|[一二两三四五六七八九十])\s*点(半)?/g, "")
+      .replace(/^[，,。\s]+|[，,。\s]+$/g, "");
+    return s || t;
+  }
+  function keywordAfter(t, re) {
+    return t.replace(re, "").replace(/(那个|这个|这条|那条|任务|的|吧|一下|。|，)/g, "").trim();
+  }
+
+  function cmdAdd(t) {
+    const time = parseTime(t);
+    const tomorrow = /明天/.test(t);
+    const task = { id: nid(), title: cleanTitle(t), kind: tomorrow ? "upcoming" : "today" };
+    if (time) task.remind = time;
+    if (tomorrow) { const d = new Date(); d.setDate(d.getDate() + 1); task.date = "明天 " + fmtDay(d).replace(/ /g, ""); }
+    state.tasks.splice(tomorrow ? state.tasks.length : 0, 0, task);
+    if (tomorrow) state.collapsed.upcoming = false;
+    state.lastAction = { type: "add", items: [task], label: "添加「" + task.title + "」" };
+    renderAll(); flash(task.id);
+    showReply({
+      lead: "知了，已添加 1 件事" + (tomorrow ? "，安排在明天。" : "。"),
+      html: '<ul class="reply-list">' + li("check", esc(task.title) + (time ? ' <span class="chip">' + icon("bell") + time + " 提醒</span>" : "")) + "</ul>",
+      actions: [undoAction],
+    });
+  }
+  function cmdImages(t) {
+    const titles = ["联系物业修厨房水管", "周三前交差旅报销单", "给妈妈挑生日礼物"];
+    const items = titles.map((x) => ({ id: nid(), title: x, kind: "today" }));
+    state.tasks.unshift(...items);
+    state.lastAction = { type: "add", items, label: "添加图片里识别出的 3 件事" };
+    renderAll(); items.forEach((x) => flash(x.id));
+    showReply({
+      lead: "从图片里识别出 3 件事，都已加到今天。",
+      html: '<ul class="reply-list">' + items.map((x) => li("check", esc(x.title))).join("") + "</ul>",
+      actions: [undoAction],
+    });
+  }
+  function confirmDelete(task) {
+    state.pending = { type: "confirm", run: () => doDelete(task) };
+    showReply({
+      tone: "danger", status: "需要确认",
+      lead: "确认要删除这件事吗？",
+      html: '<ul class="reply-list">' + li("trash", esc(task.title), "del") + "</ul>",
+      actions: [
+        { label: "确认删除", cls: "danger", run: () => send("确认", true) },
+        { label: "取消", cls: "ghost", run: () => send("取消", true) },
+      ],
+      tip: "也可以直接回复「确认」",
+    });
+  }
+  function doDelete(task) {
+    const idx = state.tasks.indexOf(task);
+    state.tasks.splice(idx, 1);
+    state.lastAction = { type: "delete", items: [task], idx, label: "删除「" + task.title + "」" };
+    state.pending = null;
+    renderAll();
+    showReply({ lead: "知了，已删除「" + task.title + "」。", actions: [undoAction] });
+  }
+  function cmdDelete(t) {
+    const kw = keywordAfter(t, /(删除|删掉|不要了|取消掉?)/);
+    const hits = state.tasks.filter((x) => kw && x.title.includes(kw));
+    if (!hits.length) return showReply({ lead: "没找到和「" + kw + "」有关的任务，换个说法试试？" });
+    if (hits.length === 1) return confirmDelete(hits[0]);
+    state.pending = { type: "clarify", options: hits };
+    showReply({
+      status: "需要你选一下",
+      lead: "找到 " + hits.length + " 件和「" + kw + "」有关的事，你说的是哪一件？",
+      actions: hits.map((h) => ({ label: h.title, run: () => send(h.title, true) })),
+      tip: "也可以直接回复序号或名称",
+    });
+  }
+  function cmdDone(t) {
+    const kw = keywordAfter(t, /(做完了|完成了|搞定了|弄好了)/);
+    const hit = state.tasks.find((x) => !x.done && x.kind !== "upcoming" && x.title.includes(kw));
+    if (!hit) return showReply({ lead: "没在今天的事里找到「" + kw + "」。" });
+    setTaskDone(hit, true);
+    state.lastAction = { type: "check", task: hit, label: "完成「" + hit.title + "」" };
+    renderAll(); flash(hit.id);
+    showReply({ lead: "知了，「" + hit.title + "」已标记完成。辛苦了。", actions: [undoAction] });
+  }
+  function cmdSummary() {
+    const done = todayTasks().filter((t) => t.done).length;
+    showReply({
+      status: "本周总结",
+      lead: "这周你完成了 23 件事，比上周多 4 件。",
+      html: '<ul class="reply-list">' +
+        li("check", "「知了」阶段 0 完成了 2 项：主界面、便利贴") +
+        li("repeat", "跑步已连续打卡 6 天") +
+        li("check", "今天已完成 " + done + " 件") +
+        li("alert", "还有 2 件遗留，其中「预约体检」已经拖了 9 天") +
+        "</ul>",
+      actions: [{ label: "看上周周报", icon: "file", cls: "ghost", run: cmdReports }],
+    });
+  }
+  function cmdReports() {
+    showReply({
+      status: "报告",
+      lead: "这是最近生成的报告，点开可以查看全文。",
+      html: '<ul class="reply-list">' +
+        li("file", "2026 年第 41 周 · 周报 <span class=\"chip\">10 月 12 日生成</span>") +
+        li("file", "2026 年 9 月 · 月报 <span class=\"chip\">10 月 1 日生成</span>") +
+        li("file", "2026 年第 40 周 · 周报") +
+        li("file", "2025 年 · 年报") + "</ul>",
+    });
+  }
+  function cmdRefuse() {
+    showReply({
+      lead: "这个超出我的本事了。我只负责记事：任务和项目的添加、修改、删除、查询，还有总结。",
+      actions: [{ label: "试试：这周完成了什么？", cls: "ghost", run: () => send("这周完成了什么？", true) }],
+    });
+  }
+  function cmdOffline(t) {
+    showReply({
+      status: "已暂存",
+      lead: "网络好像断了。这句话已经存进收件箱，恢复后我会自动处理，再通知你。",
+      html: '<ul class="reply-list">' + li("inbox", "收件箱 · 1 条待处理：" + esc(cleanTitle(t))) + "</ul>",
+    });
+  }
+  function cmdUndo() {
+    const a = state.lastAction;
+    if (!a) return showReply({ lead: "没有可以撤销的操作了。" });
+    if (a.type === "add") a.items.forEach((x) => state.tasks.splice(state.tasks.indexOf(x), 1));
+    if (a.type === "delete") state.tasks.splice(a.idx, 0, ...a.items);
+    if (a.type === "check") setTaskDone(a.task, !a.task.done);
+    if (a.type === "node-add") a.parent.kids.splice(a.parent.kids.indexOf(a.node), 1);
+    if (a.type === "node-done") { a.node.done = false; a.node.doneToday = false; }
+    if (a.type === "schedule") state.tasks.splice(state.tasks.indexOf(a.task), 1);
+    state.lastAction = null;
+    renderAll();
+    if (a.items) a.items.forEach((x) => flash(x.id));
+    showReply({ lead: "知了，已撤销：" + a.label + "。" });
+  }
+  function suggestSwitch(t, to) {
+    showReply({
+      status: "模式提示",
+      lead: to === "task" ? "这句话更像一条任务，要切换到任务模式吗？" : "这句话像是在说项目，要切换到项目模式吗？",
+      actions: [
+        { label: "切换并执行", cls: "primary", run: () => { setMode(to); send(t, true); } },
+        { label: "不用了", cls: "ghost", run: closeReply },
+      ],
+    });
+  }
+
+  function cmdProject(t) {
+    if (/提醒我/.test(t)) return suggestSwitch(t, "task");
+    const names = [...t.matchAll(/「([^」]+)」/g)].map((m) => m[1]);
+    if (/安排到今天/.test(t)) {
+      const hit = findNode((n) => n.title.includes(names[0] || ""));
+      if (!hit) return showReply({ lead: "没找到「" + names[0] + "」。" });
+      const task = { id: nid(), title: hit.node.title, kind: "today", link: hit.node.id, linkName: "知了 › " + (hit.parent ? hit.parent.title.split(" · ")[0] : "") };
+      state.tasks.unshift(task);
+      state.lastAction = { type: "schedule", task, label: "把「" + hit.node.title + "」安排到今天" };
+      renderAll(); flash(task.id);
+      return showReply({ lead: "知了，「" + hit.node.title + "」已经排进今天的任务。勾选完成时，项目里会同步打勾。", actions: [undoAction] });
+    }
+    if (/(读完|做完|完成)/.test(t)) {
+      const key = keywordAfter(t.replace(/「[^」]+」/g, ""), /(读完了|做完了|完成了)/);
+      const hit = findNode((n, d, p) => n.title.includes(key) && !n.done && (!names[0] || (p && p.title.includes(names[0]))));
+      if (!hit) return showReply({ lead: "没找到「" + key + "」。" });
+      hit.node.done = true; hit.node.doneToday = true;
+      state.lastAction = { type: "node-done", node: hit.node, label: "完成「" + hit.node.title + "」" };
+      renderAll(); flash(hit.node.id);
+      const parent = hit.parent;
+      if (parent && parent.kids.every((k) => k.done) && !parent.done) {
+        return showReply({
+          lead: "知了，「" + hit.node.title + "」已完成。「" + parent.title + "」下面的事都完成了，要把它也标记为完成吗？",
+          actions: [
+            { label: "标记完成", cls: "primary", run: () => { parent.done = true; parent.doneToday = true; renderAll(); flash(parent.id); showReply({ lead: "知了，「" + parent.title + "」已完成。" }); } },
+            { label: "先不用", cls: "ghost", run: closeReply },
+          ],
+        });
+      }
+      return showReply({ lead: "知了，「" + hit.node.title + "」已完成。", actions: [undoAction] });
+    }
+    if (/(加|添加|新建|增加)/.test(t)) {
+      const title = (t.split(/[：:]/)[1] || "新的一项").trim();
+      const target = names[0] || "知了";
+      const hit = findNode((n) => n.title.includes(target)) || { node: state.projects[0], depth: 1 };
+      let parent = hit.node, depth = hit.depth;
+      if (parent.id === "p1" && /阶段\s*1/.test(t)) { parent = findNode((n) => n.id === "n2").node; depth = 2; }
+      if (depth >= 3) {
+        return showReply({
+          status: "无法执行",
+          lead: "「" + parent.title + "」已经在第 3 层了，项目最多三层（含项目本身），不能再往下加。",
+          html: '<ul class="reply-list">' + li("info", "可以把「" + esc(title) + "」加在「" + esc(hit.parent ? hit.parent.title : "") + "」下面，和「" + esc(parent.title) + "」并列。") + "</ul>",
+          actions: [{ label: "就这样加", cls: "primary", run: () => send("给「" + (hit.parent ? hit.parent.title.split(" · ")[0] : "") + "」加一项：" + title, true) }],
+        });
+      }
+      parent.kids = parent.kids || [];
+      const node = { id: nid(), title };
+      parent.kids.push(node);
+      state.collapsed[parent.id] = false;
+      state.lastAction = { type: "node-add", node, parent, label: "添加「" + title + "」" };
+      renderAll(); flash(node.id);
+      return showReply({ lead: "知了，已把「" + title + "」加到「" + parent.title + "」下面。", actions: [undoAction] });
+    }
+    showReply({ lead: "我没太听懂。在项目模式下，你可以让我新建项目、加一项、标记完成，或者把某一项安排到今天。" });
+  }
+
+  function handle(t) {
+    if (state.pending && state.pending.type === "confirm") {
+      const p = state.pending; state.pending = null;
+      if (/^(确认|是|好的?|删吧|对)/.test(t)) return p.run();
+      return showReply({ lead: "好的，已取消。" });
+    }
+    if (state.pending && state.pending.type === "clarify") {
+      const opts = state.pending.options; state.pending = null;
+      const hit = opts.find((o) => o.title === t || t.includes(o.title)) || opts[parseInt(t, 10) - 1];
+      if (hit) return confirmDelete(hit);
+    }
+    if (state.images.length) { clearImages(); return cmdImages(t); }
+    if (/撤销/.test(t)) return cmdUndo();
+    if (/天气|笑话|写代码|翻译|股票/.test(t)) return cmdRefuse();
+    if (/模拟断网/.test(t)) return cmdOffline(t);
+    if (state.mode === "project") return cmdProject(t);
+    if (/(新建|创建)项目/.test(t)) return suggestSwitch(t, "project");
+    if (/(删除|删掉|不要了)/.test(t)) return cmdDelete(t);
+    if (/(完成了什么|总结|回顾)/.test(t)) return cmdSummary();
+    if (/(周报|月报|年报|报告)/.test(t)) return cmdReports();
+    if (/(做完了|完成了|搞定了|弄好了)/.test(t)) return cmdDone(t);
+    return cmdAdd(t);
+  }
+
+  function send(text, fromUi) {
+    const t = (text != null ? text : $("input").value).trim();
+    if (!t && !state.images.length) return;
+    if (!fromUi) { $("input").value = ""; autosize(); }
+    updateSend();
+    thinking();
+    setTimeout(() => handle(t || "识别图片"), 520);
+  }
+
+  /* ---------- 勾选 ---------- */
+  function setTaskDone(t, done) {
+    t.done = done;
+    if (t.link) {
+      const hit = findNode((n) => n.id === t.link);
+      if (hit) { hit.node.done = done; hit.node.doneToday = done; }
+    }
+  }
+  $("taskBody").addEventListener("click", (e) => {
+    const sec = e.target.closest("[data-sec]");
+    if (sec) { state.collapsed[sec.dataset.sec] = !state.collapsed[sec.dataset.sec]; renderTasks(); return; }
+    const b = e.target.closest("[data-check]");
+    if (!b) return;
+    const t = state.tasks.find((x) => x.id === b.dataset.check);
+    const row = b.closest(".task");
+    setTaskDone(t, !t.done);
+    state.lastAction = { type: "check", task: t, label: (t.done ? "完成" : "取消完成") + "「" + t.title + "」" };
+    row.classList.toggle("is-done", t.done);
+    setTimeout(() => {
+      row.classList.add("leaving");
+      setTimeout(() => { renderAll(); flash(t.id); }, 230);
+    }, 380);
+  });
+
+  /* ---------- 项目区交互（只读：展开折叠、切换视图） ---------- */
+  $("projBody").addEventListener("click", (e) => {
+    const tg = e.target.closest("[data-toggle]");
+    if (tg) { state.collapsed[tg.dataset.toggle] = !state.collapsed[tg.dataset.toggle]; renderProjects(); return; }
+    const sec = e.target.closest("[data-sec]");
+    if (sec) { state.collapsed[sec.dataset.sec] = !state.collapsed[sec.dataset.sec]; renderProjects(); }
+  });
+  $("viewSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-view]");
+    if (!b) return;
+    state.view = b.dataset.view;
+    $("viewSeg").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+    renderProjects();
+  });
+
+  /* ---------- 热力图交互 ---------- */
+  const tip = $("tip");
+  $("heatGrid").addEventListener("mouseover", (e) => {
+    const c = e.target.closest("[data-i]");
+    if (!c) return;
+    const d = heat.days[+c.dataset.i];
+    tip.innerHTML = fmtDay(d.date) + ' · 任务 <span class="n">' + d.tasks + '</span> · 项目 <span class="n">' + d.nodes + "</span>";
+    const r = c.getBoundingClientRect();
+    tip.classList.add("show");
+    const w = tip.offsetWidth;
+    tip.style.left = Math.min(window.innerWidth - w - 8, Math.max(8, r.left + r.width / 2 - w / 2)) + "px";
+    tip.style.top = r.top - tip.offsetHeight - 8 + "px";
+  });
+  $("heatGrid").addEventListener("mouseleave", () => tip.classList.remove("show"));
+  $("heatGrid").addEventListener("click", (e) => {
+    const c = e.target.closest("[data-i]");
+    if (!c) return;
+    const d = heat.days[+c.dataset.i];
+    const pool = ["整理会议纪要", "跑步 30 分钟", "回复客户邮件", "读《置身事内》", "买菜", "修改简历", "交水电费", "写周报", "整理照片"];
+    const n = d.tasks + d.nodes;
+    showReply({
+      status: fmtDay(d.date),
+      lead: n ? "这一天完成了 " + n + " 件事。" : "这一天没有完成记录。",
+      html: n ? '<ul class="reply-list">' + pool.slice(0, Math.min(n, 6)).map((x) => li("check", x)).join("") + (n > 6 ? li("more", "还有 " + (n - 6) + " 件") : "") + "</ul>" : "",
+    });
+  });
+  $("reportBtn").addEventListener("click", cmdReports);
+
+  /* ---------- 输入框 ---------- */
+  const input = $("input");
+  function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 150) + "px"; }
+  function updateSend() { $("sendBtn").disabled = !input.value.trim() && !state.images.length; }
+  function updateExamples() {
+    const ex = $("examples");
+    const show = !$("replySlot").innerHTML && !input.value.trim();
+    ex.classList.toggle("show", show);
+    ex.innerHTML = '<span class="lbl">试试：</span>' + EXAMPLES[state.mode].map((x) => '<button class="ex">' + esc(x) + "</button>").join("");
+  }
+  function setMode(m) {
+    state.mode = m;
+    $("modeSeg").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.mode === m));
+    input.placeholder = PLACEHOLDER[m];
+    updateExamples();
+  }
+  $("modeSeg").addEventListener("click", (e) => { const b = e.target.closest("[data-mode]"); if (b) { setMode(b.dataset.mode); input.focus(); } });
+  $("examples").addEventListener("click", (e) => {
+    const b = e.target.closest(".ex");
+    if (!b) return;
+    input.value = b.textContent; autosize(); updateSend(); input.focus();
+    updateExamples();
+  });
+  input.addEventListener("input", () => { autosize(); updateSend(); updateExamples(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); }
+    if (e.key === "Tab" && !e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) { e.preventDefault(); setMode(state.mode === "task" ? "project" : "task"); }
+  });
+  $("sendBtn").addEventListener("click", () => send());
+
+  function addImages(files) {
+    [...files].filter((f) => f.type.startsWith("image/")).forEach((f) => {
+      const r = new FileReader();
+      r.onload = () => { state.images.push(r.result); renderImages(); };
+      r.readAsDataURL(f);
+    });
+  }
+  function renderImages() {
+    $("attachments").innerHTML = state.images.map((src, i) => '<div class="thumb"><img src="' + src + '" alt=""><button data-rm="' + i + '" aria-label="移除">' + icon("x") + "</button></div>").join("");
+    updateSend();
+  }
+  function clearImages() { state.images = []; renderImages(); }
+  $("attachments").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) { state.images.splice(+b.dataset.rm, 1); renderImages(); } });
+  $("attachBtn").addEventListener("click", () => $("fileInput").click());
+  $("fileInput").addEventListener("change", (e) => { addImages(e.target.files); e.target.value = ""; });
+  input.addEventListener("paste", (e) => {
+    const files = [...(e.clipboardData || {}).files || []];
+    if (files.length) { e.preventDefault(); addImages(files); }
+  });
+
+  /* ---------- 静息态 / 聚焦态 ---------- */
+  function focusMode(on) {
+    state.focused = on;
+    $("app").classList.toggle("focused", on);
+    if (!on) { closeReply(); input.blur(); }
+  }
+  input.addEventListener("focus", () => focusMode(true));
+  $("composer").addEventListener("mousedown", () => { if (!state.focused) focusMode(true); });
+  $("replySlot").addEventListener("click", (e) => { if (e.target.closest("[data-close-reply]")) closeReply(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if ($("replySlot").innerHTML) closeReply();
+    else focusMode(false);
+  });
+  $("stage").addEventListener("mousedown", (e) => {
+    if (!state.focused) return;
+    if (e.target.closest(".composer, .reply, .examples, .card, .ex")) return;
+    if ($("replySlot").innerHTML) return;
+    focusMode(false);
+  });
+
+  /* ---------- 启动 ---------- */
+  buildHeat();
+  setMode("task");
+  renderAll();
+  window.Cicada.mountIcons();
+  setInterval(renderGreeting, 60000);
+})();
+</script>
+</body>
+</html>

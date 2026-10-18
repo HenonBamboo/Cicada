@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-board"
+description = "Enables the get_board command without any pre-configured scope."
+commands.allow = ["get_board"]
+
+[[permission]]
+identifier = "deny-get-board"
+description = "Denies the get_board command without any pre-configured scope."
+commands.deny = ["get_board"]

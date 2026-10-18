@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-heatmap"
+description = "Enables the get_heatmap command without any pre-configured scope."
+commands.allow = ["get_heatmap"]
+
+[[permission]]
+identifier = "deny-get-heatmap"
+description = "Denies the get_heatmap command without any pre-configured scope."
+commands.deny = ["get_heatmap"]

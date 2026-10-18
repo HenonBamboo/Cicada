@@ -1,0 +1,326 @@
+/* 颜色取自已确认便利贴原型；组件只使用这些主题变量。 */
+:root {
+  --st-amber: #fff4d6;
+  --st-pink: #fce6ea;
+  --st-blue: #e2ecfa;
+  --st-green: #dff1e9;
+  --st-ink: #2a2a24;
+  --st-ink-2: #6e6a5c;
+  --st-line: rgba(60, 50, 20, 0.12);
+}
+[data-theme="dark"],
+[data-theme="forest"] {
+  --st-amber: #3a3324;
+  --st-pink: #3b2a2f;
+  --st-blue: #25303e;
+  --st-green: #213530;
+  --st-ink: #ece8de;
+  --st-ink-2: #a8a293;
+  --st-line: rgba(255, 255, 255, 0.1);
+}
+html[data-window="sticky"] body {
+  background: transparent;
+}
+.sticky {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: calc(14px * var(--rs));
+  background: color-mix(in srgb, var(--st-bg) calc(var(--alpha) * 100%), transparent);
+  backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid var(--st-line);
+  color: var(--st-ink);
+  --alpha: 0.9;
+  --st-bg: var(--st-amber);
+  overflow: hidden;
+}
+.sticky.c-amber {
+  --st-bg: var(--st-amber);
+}
+.sticky.c-pink {
+  --st-bg: var(--st-pink);
+}
+.sticky.c-blue {
+  --st-bg: var(--st-blue);
+}
+.sticky.c-green {
+  --st-bg: var(--st-green);
+}
+.sticky.c-theme {
+  --st-bg: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  --st-ink: var(--text);
+  --st-ink-2: var(--text-2);
+  --st-line: var(--border);
+}
+.st-head {
+  height: 34px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 14px;
+  cursor: grab;
+}
+.st-title {
+  font-size: 0.8rem;
+  color: var(--st-ink-2);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-tools {
+  display: flex;
+  gap: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.sticky:hover .st-tools,
+.sticky:focus-within .st-tools,
+.sticky.menu-open .st-tools {
+  opacity: 1;
+}
+.st-tools button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--st-ink-2);
+  display: grid;
+  place-items: center;
+}
+.st-tools button:hover {
+  background: var(--st-line);
+  color: var(--st-ink);
+}
+.st-tools button.on {
+  color: var(--accent);
+}
+.st-tools .icon {
+  width: 15px;
+  height: 15px;
+}
+.st-lock {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--st-line);
+  color: var(--st-ink-2);
+  display: grid;
+  place-items: center;
+}
+.st-lock .icon {
+  width: 12px;
+  height: 12px;
+}
+.sticky.locked .st-tools {
+  visibility: hidden;
+}
+.st-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 10px 6px;
+}
+.st-sec {
+  padding: 6px 6px 2px;
+  font-size: 0.74rem;
+  color: var(--st-ink-2);
+}
+.st-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 5px 6px;
+  border-radius: var(--r-sm);
+  font-size: 0.93rem;
+  overflow-wrap: anywhere;
+}
+.st-task .check {
+  margin-top: 2px;
+  width: 17px;
+  height: 17px;
+  border-color: color-mix(in srgb, var(--st-ink) 30%, transparent);
+}
+.st-task .check svg {
+  inset: 1.5px;
+}
+.st-task.is-done .t {
+  color: var(--st-ink-2);
+  text-decoration: line-through;
+}
+.st-task .meta {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--st-ink-2);
+}
+.st-task .meta.warn {
+  color: var(--amber);
+}
+.st-task.flash {
+  animation: sticky-flash 1200ms ease-out;
+}
+@keyframes sticky-flash {
+  0%,
+  25% {
+    background: var(--st-line);
+  }
+  100% {
+    background: transparent;
+  }
+}
+.st-input {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 10px 10px;
+  padding: 0 6px 0 10px;
+  height: 34px;
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--st-ink) 6%, transparent);
+}
+.st-input input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 0.88rem;
+  color: inherit;
+}
+.st-input input::placeholder {
+  color: var(--st-ink-2);
+}
+.st-input .icon {
+  width: 14px;
+  height: 14px;
+  color: var(--st-ink-2);
+}
+.st-tree {
+  padding: 2px 6px 10px;
+  font-size: 0.88rem;
+}
+.st-node {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.st-node.l2 {
+  padding-left: 16px;
+}
+.st-node.l3 {
+  padding-left: 34px;
+  font-size: 0.84rem;
+}
+.st-node .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--st-ink) 35%, transparent);
+  flex: none;
+}
+.st-node.done .dot {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.st-node.done .t {
+  color: var(--st-ink-2);
+  text-decoration: line-through;
+}
+.st-node .p {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--st-ink-2);
+}
+.st-pop {
+  position: absolute;
+  top: 36px;
+  right: 8px;
+  z-index: 5;
+  padding: 10px;
+  border-radius: var(--r-card);
+  background: var(--pop-bg);
+  border: 1px solid var(--border);
+  box-shadow: var(--pop-shadow);
+  color: var(--text);
+}
+.st-pop .lbl {
+  display: block;
+  font-size: 0.74rem;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+.swatches {
+  display: flex;
+  gap: 8px;
+}
+.swatches button {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+}
+.swatches button.on {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.swatch-amber {
+  background: var(--st-amber);
+}
+.swatch-pink {
+  background: var(--st-pink);
+}
+.swatch-blue {
+  background: var(--st-blue);
+}
+.swatch-green {
+  background: var(--st-green);
+}
+.swatch-theme {
+  background: var(--surface);
+}
+.st-pop input[type="range"] {
+  width: 160px;
+  accent-color: var(--accent);
+}
+.edge-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+.edge-option input {
+  accent-color: var(--accent);
+}
+.st-empty,
+.st-status {
+  margin: 6px;
+  font-size: 0.8rem;
+  color: var(--st-ink-2);
+  overflow-wrap: anywhere;
+}
+.st-status {
+  flex: none;
+  margin: 0 16px 8px;
+}
+.st-attachments {
+  flex: none;
+  margin: 0 16px 8px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font-size: 0.78rem;
+  color: var(--st-ink-2);
+}

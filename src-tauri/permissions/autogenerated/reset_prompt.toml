@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reset-prompt"
+description = "Enables the reset_prompt command without any pre-configured scope."
+commands.allow = ["reset_prompt"]
+
+[[permission]]
+identifier = "deny-reset-prompt"
+description = "Denies the reset_prompt command without any pre-configured scope."
+commands.deny = ["reset_prompt"]

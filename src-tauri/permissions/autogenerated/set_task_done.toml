@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-task-done"
+description = "Enables the set_task_done command without any pre-configured scope."
+commands.allow = ["set_task_done"]
+
+[[permission]]
+identifier = "deny-set-task-done"
+description = "Denies the set_task_done command without any pre-configured scope."
+commands.deny = ["set_task_done"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-operation-log"
+description = "Enables the list_operation_log command without any pre-configured scope."
+commands.allow = ["list_operation_log"]
+
+[[permission]]
+identifier = "deny-list-operation-log"
+description = "Denies the list_operation_log command without any pre-configured scope."
+commands.deny = ["list_operation_log"]

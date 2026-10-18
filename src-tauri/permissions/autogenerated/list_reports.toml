@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-reports"
+description = "Enables the list_reports command without any pre-configured scope."
+commands.allow = ["list_reports"]
+
+[[permission]]
+identifier = "deny-list-reports"
+description = "Denies the list_reports command without any pre-configured scope."
+commands.deny = ["list_reports"]

@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知了 · 便利贴原型</title>
+<link rel="icon" href="../../assets/logo/logo-small.svg">
+<link rel="stylesheet" href="shared/theme.css">
+<script src="shared/theme.js"></script>
+<style>
+  :root {
+    --st-amber: #FFF4D6; --st-pink: #FCE6EA; --st-blue: #E2ECFA; --st-green: #DFF1E9;
+    --st-ink: #2A2A24; --st-ink-2: #6E6A5C; --st-line: rgba(60, 50, 20, 0.12);
+  }
+  [data-theme="dark"], [data-theme="forest"] {
+    --st-amber: #3A3324; --st-pink: #3B2A2F; --st-blue: #25303E; --st-green: #213530;
+    --st-ink: #ECE8DE; --st-ink-2: #A8A293; --st-line: rgba(255, 255, 255, 0.1);
+  }
+  body { background: var(--wallpaper); overflow: hidden; user-select: none; }
+  [data-theme="light"] body, [data-theme="paper"] body { background: linear-gradient(140deg, #CFE0DA 0%, #E7E3D3 50%, #D9D3E6 100%); }
+  .desk { position: fixed; inset: 0 0 48px 0; }
+
+  /* 原型说明条 */
+  .proto-bar { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 14px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop-shadow); font-size: 0.82rem; color: var(--text-2); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); white-space: nowrap; }
+  .proto-bar a { color: var(--accent); text-decoration: none; }
+
+  /* 便利贴 */
+  .sticky { position: absolute; width: 280px; display: flex; flex-direction: column; border-radius: calc(14px * var(--rs)); background: color-mix(in srgb, var(--st-bg) calc(var(--alpha) * 100%), transparent); -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3); border: 1px solid var(--st-line); box-shadow: 0 14px 36px rgba(20, 30, 28, 0.16), 0 2px 6px rgba(20, 30, 28, 0.08); color: var(--st-ink); transition: box-shadow 0.2s, opacity 0.2s; --alpha: 0.9; --st-bg: var(--st-amber); }
+  .sticky.c-amber { --st-bg: var(--st-amber); }
+  .sticky.c-pink { --st-bg: var(--st-pink); }
+  .sticky.c-blue { --st-bg: var(--st-blue); }
+  .sticky.c-green { --st-bg: var(--st-green); }
+  .sticky.c-theme { --st-bg: var(--surface); color: var(--text); }
+  .sticky.dragging { box-shadow: 0 22px 48px rgba(20, 30, 28, 0.24), 0 4px 10px rgba(20, 30, 28, 0.1); }
+  .sticky.locked { pointer-events: none; }
+  .sticky.locked .st-lock { display: grid; }
+
+  .st-head { height: 34px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px 0 14px; cursor: grab; }
+  .dragging .st-head { cursor: grabbing; }
+  .st-title { font-size: 0.8rem; color: var(--st-ink-2); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .c-theme .st-title { color: var(--text-2); }
+  .st-tools { display: flex; gap: 0; opacity: 0; transition: opacity 0.15s; }
+  .sticky:hover .st-tools, .sticky.menu-open .st-tools { opacity: 1; }
+  .st-tools button { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--st-ink-2); display: grid; place-items: center; }
+  .st-tools button:hover { background: var(--st-line); color: var(--st-ink); }
+  .st-tools button.on { color: var(--accent); }
+  .st-tools .icon { width: 15px; height: 15px; }
+  .st-lock { display: none; position: absolute; top: 8px; right: 8px; width: 22px; height: 22px; border-radius: 50%; background: var(--st-line); color: var(--st-ink-2); place-items: center; }
+  .st-lock .icon { width: 12px; height: 12px; }
+
+  .st-body { flex: 1; min-height: 0; max-height: 300px; overflow: auto; padding: 0 10px 6px; }
+  .st-sec { padding: 6px 6px 2px; font-size: 0.74rem; color: var(--st-ink-2); }
+  .st-task { display: flex; align-items: flex-start; gap: 9px; padding: 5px 6px; border-radius: 8px; font-size: 0.93rem; }
+  .st-task .check { margin-top: 2px; width: 17px; height: 17px; border-color: color-mix(in srgb, var(--st-ink) 30%, transparent); }
+  .st-task .check svg { inset: 1.5px; }
+  .st-task.is-done .t { color: var(--st-ink-2); text-decoration: line-through; }
+  .st-task .meta { display: block; font-size: 0.74rem; color: var(--st-ink-2); }
+  .st-task .meta.warn { color: var(--amber); }
+  .flash { animation: flash 1.4s ease-out; }
+  @keyframes flash { 0%, 25% { background: var(--st-line); } 100% { background: transparent; } }
+
+  .st-input { flex: none; display: flex; align-items: center; gap: 6px; margin: 4px 10px 10px; padding: 0 6px 0 10px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--st-ink) 6%, transparent); }
+  .st-input input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; font-size: 0.88rem; color: inherit; }
+  .st-input input::placeholder { color: var(--st-ink-2); }
+  .st-input .icon { width: 14px; height: 14px; color: var(--st-ink-2); }
+
+  /* 项目便利贴：只读树 */
+  .st-tree { padding: 2px 6px 10px; font-size: 0.88rem; }
+  .st-node { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .st-node.l2 { padding-left: 16px; }
+  .st-node.l3 { padding-left: 34px; font-size: 0.84rem; }
+  .st-node .dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid color-mix(in srgb, var(--st-ink) 35%, transparent); flex: none; }
+  .st-node.done .dot { background: var(--accent); border-color: var(--accent); }
+  .st-node.done .t { color: var(--st-ink-2); text-decoration: line-through; }
+  .st-node .p { margin-left: auto; font-family: var(--font-mono); font-size: 0.72rem; color: var(--st-ink-2); }
+
+  /* 弹出：颜色、透明度 */
+  .pop { position: absolute; top: 36px; right: 8px; z-index: 5; padding: 10px; border-radius: 12px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop-shadow); color: var(--text); display: none; }
+  [data-theme="glass"] .pop { background: rgba(250, 252, 251, 0.96); }
+  .pop.open { display: block; }
+  .pop .lbl { font-size: 0.74rem; color: var(--text-3); margin-bottom: 8px; }
+  .swatches { display: flex; gap: 8px; }
+  .swatches button { width: 24px; height: 24px; border-radius: 50%; padding: 0; border: 1px solid rgba(0, 0, 0, 0.12); }
+  .swatches button.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .pop input[type="range"] { width: 160px; accent-color: var(--accent); }
+
+  /* 任务栏与托盘 */
+  .taskbar { position: fixed; left: 0; right: 0; bottom: 0; height: 48px; display: flex; align-items: center; justify-content: center; gap: 6px; background: rgba(243, 245, 244, 0.82); -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px); border-top: 1px solid rgba(0, 0, 0, 0.06); color: #1F2A2A; }
+  [data-theme="dark"] .taskbar, [data-theme="forest"] .taskbar { background: rgba(28, 31, 32, 0.85); border-top-color: rgba(255, 255, 255, 0.06); color: #E8ECEB; }
+  .tb-app { width: 40px; height: 40px; border-radius: 6px; display: grid; place-items: center; }
+  .tb-app span { width: 24px; height: 24px; border-radius: 6px; background: currentColor; opacity: 0.18; }
+  .tray { position: absolute; right: 12px; top: 0; bottom: 0; display: flex; align-items: center; gap: 4px; font-size: 0.78rem; }
+  .tray-btn { width: 32px; height: 36px; border: 0; border-radius: 6px; background: transparent; display: grid; place-items: center; }
+  .tray-btn:hover, .tray-btn.open { background: rgba(127, 127, 127, 0.16); }
+  .tray-btn img { width: 16px; height: 16px; }
+  .clock { text-align: right; line-height: 1.25; padding: 0 6px; font-family: var(--font-ui); }
+  .tray-menu { position: fixed; right: 60px; bottom: 56px; z-index: 40; width: 220px; padding: 6px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop-shadow); display: none; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+  [data-theme="glass"] .tray-menu { background: rgba(250, 252, 251, 0.95); }
+  .tray-menu.open { display: block; }
+  .tray-menu .hd { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px; font-size: 0.86rem; font-weight: 500; }
+  .tray-menu .hd img { width: 18px; height: 18px; }
+  .tray-menu button, .tray-menu a { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; font-size: 0.88rem; color: var(--text); text-decoration: none; text-align: left; }
+  .tray-menu button:hover, .tray-menu a:hover { background: var(--surface-2); }
+  .tray-menu .icon { color: var(--text-2); }
+  .tray-menu .kbd { margin-left: auto; font-size: 0.74rem; color: var(--text-3); }
+  .tray-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+  .toast { position: fixed; right: 14px; bottom: 60px; z-index: 35; width: 320px; padding: 12px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); box-shadow: var(--pop-shadow); transform: translateY(12px); opacity: 0; transition: opacity 0.25s var(--ease), transform 0.25s var(--ease); pointer-events: none; -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur); }
+  [data-theme="glass"] .toast { background: rgba(250, 252, 251, 0.95); }
+  .toast.show { opacity: 1; transform: none; }
+  .toast .hd { display: flex; align-items: center; gap: 8px; font-size: 0.76rem; color: var(--text-2); }
+  .toast .hd img { width: 16px; height: 16px; }
+  .toast .bd { margin-top: 6px; font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="proto-bar">
+  <span class="proto-badge">原型</span>
+  拖动顶部移动 · 贴近屏幕边缘会吸附 · 双击顶部打开主窗口 · 右下角托盘有菜单
+  <a href="主界面.html">返回主界面</a>
+  <span data-theme-switcher></span>
+</div>
+
+<div class="desk" id="desk">
+  <!-- 今日任务便利贴 -->
+  <section class="sticky c-amber" id="stToday" style="left: 64px; top: 84px;">
+    <span class="st-lock" title="已锁定，通过托盘菜单解锁">__LOCK__</span>
+    <header class="st-head" data-drag>
+      <span class="st-title" id="todayTitle">今日</span>
+      <div class="st-tools">
+        <button data-act="pin" class="on" title="置顶">__PIN__</button>
+        <button data-act="color" title="颜色">__DROP__</button>
+        <button data-act="alpha" title="透明度">__SUN__</button>
+        <button data-act="lock" title="锁定（鼠标穿透）">__LOCK__</button>
+        <button data-act="open" title="打开主窗口">__WIN__</button>
+        <button data-act="close" title="关闭">__X__</button>
+      </div>
+    </header>
+    <div class="pop" data-pop="color"><div class="lbl">便利贴颜色</div><div class="swatches"></div></div>
+    <div class="pop" data-pop="alpha"><div class="lbl">透明度</div><input type="range" min="55" max="100" value="90"></div>
+    <div class="st-body" id="todayBody"></div>
+    <label class="st-input">__PLUS__<input id="todayInput" placeholder="记一件事，回车就好"></label>
+  </section>
+
+  <!-- 项目便利贴（只读） -->
+  <section class="sticky c-green" id="stProject" style="left: 380px; top: 128px;">
+    <span class="st-lock" title="已锁定，通过托盘菜单解锁">__LOCK__</span>
+    <header class="st-head" data-drag>
+      <span class="st-title">项目 · 知了</span>
+      <div class="st-tools">
+        <button data-act="pin" class="on" title="置顶">__PIN__</button>
+        <button data-act="color" title="颜色">__DROP__</button>
+        <button data-act="alpha" title="透明度">__SUN__</button>
+        <button data-act="lock" title="锁定（鼠标穿透）">__LOCK__</button>
+        <button data-act="open" title="打开主窗口">__WIN__</button>
+        <button data-act="close" title="关闭">__X__</button>
+      </div>
+    </header>
+    <div class="pop" data-pop="color"><div class="lbl">便利贴颜色</div><div class="swatches"></div></div>
+    <div class="pop" data-pop="alpha"><div class="lbl">透明度</div><input type="range" min="55" max="100" value="90"></div>
+    <div class="st-tree" id="projTree"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"><div class="hd"><img src="../../assets/logo/logo-small.svg" alt="">知了 · 现在</div><div class="bd" id="toastBody"></div></div>
+
+<div class="tray-menu" id="trayMenu">
+  <div class="hd"><img src="../../assets/logo/logo-small.svg" alt="">知了</div>
+  <a href="主界面.html">__WIN__打开主窗口</a>
+  <a href="快速记录.html">__ZAP__快速记录<span class="kbd">Ctrl+Alt+Space</span></a>
+  <button id="trayToggle">__STICKY__<span>隐藏便利贴</span></button>
+  <button id="trayUnlock">__LOCK__<span>解锁所有便利贴</span></button>
+  <button id="trayNew">__PLUS__新建项目便利贴</button>
+  <hr>
+  <a href="设置.html">__SET__设置</a>
+  <button>__POWER__退出知了</button>
+</div>
+
+<footer class="taskbar">
+  <div class="tb-app"><span></span></div>
+  <div class="tb-app"><span></span></div>
+  <div class="tb-app"><span></span></div>
+  <div class="tb-app"><span></span></div>
+  <div class="tray">
+    <button class="tray-btn" id="trayBtn" title="知了"><img src="../../assets/logo/logo-small.svg" alt="知了"></button>
+    <div class="clock" id="clock"></div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  const { icon, CHECK_SVG } = window.Cicada;
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+  /* 占位图标替换 */
+  const MAP = { __LOCK__: "lock", __PIN__: "pin", __DROP__: "droplet", __SUN__: "eye", __WIN__: "window", __X__: "x", __PLUS__: "plus", __ZAP__: "zap", __STICKY__: "sticky", __SET__: "settings", __POWER__: "power" };
+  document.body.innerHTML = document.body.innerHTML.replace(/__[A-Z]+__/g, (m) => icon(MAP[m]));
+
+  const tasks = [
+    { id: 1, title: "整理本周会议纪要" },
+    { id: 2, title: "给「知了」做快速记录原型" },
+    { id: 3, title: "下午 3 点产品评审会议", meta: "15:00 提醒" },
+    { id: 4, title: "回复王老师的邮件", meta: "已延期 3 天", warn: true },
+    { id: 5, title: "预约体检", meta: "已延期 9 天", warn: true },
+    { id: 6, title: "跑步 30 分钟", done: true },
+    { id: 7, title: "买猫粮", done: true },
+  ];
+  const project = [
+    { t: "阶段 0 · 界面原型", l: 2, p: "2/4" },
+    { t: "主界面", l: 3, done: true }, { t: "便利贴", l: 3, done: true }, { t: "快速记录", l: 3 }, { t: "设置页", l: 3 },
+    { t: "阶段 1 · 项目骨架", l: 2, p: "0/3" },
+    { t: "Tauri 模板", l: 3 }, { t: "主题系统", l: 3 }, { t: "数据库迁移", l: 3 },
+    { t: "阶段 2 · 主界面", l: 2 },
+  ];
+
+  function renderToday(flashId) {
+    const open = tasks.filter((t) => !t.done), done = tasks.filter((t) => t.done);
+    const row = (t) => '<div class="st-task' + (t.done ? " is-done" : "") + '" data-id="' + t.id + '"><button class="check" data-check="' + t.id + '">' + CHECK_SVG + '</button><div><span class="t">' + esc(t.title) + "</span>" + (t.meta && !t.done ? '<span class="meta' + (t.warn ? " warn" : "") + '">' + t.meta + "</span>" : "") + "</div></div>";
+    $("todayBody").innerHTML = open.map(row).join("") + (done.length ? '<div class="st-sec">已完成 ' + done.length + "</div>" + done.map(row).join("") : "");
+    const d = new Date();
+    $("todayTitle").textContent = "今日 · " + (d.getMonth() + 1) + " 月 " + d.getDate() + " 日 · 剩 " + open.length + " 件";
+    if (flashId) { const el = $("todayBody").querySelector('[data-id="' + flashId + '"]'); if (el) { el.classList.add("flash"); el.scrollIntoView({ block: "nearest" }); } }
+  }
+  $("todayBody").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-check]");
+    if (!b) return;
+    const t = tasks.find((x) => x.id === +b.dataset.check);
+    t.done = !t.done;
+    b.parentElement.classList.toggle("is-done", t.done);
+    setTimeout(() => renderToday(), 420);
+  });
+  $("todayInput").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing) return;
+    const v = e.target.value.trim();
+    if (!v) return;
+    e.target.value = "";
+    const t = { id: Date.now(), title: v };
+    tasks.unshift(t);
+    setTimeout(() => { renderToday(t.id); toast("知了，已添加：" + v); }, 450);
+  });
+  $("projTree").innerHTML = project.map((n) => '<div class="st-node l' + n.l + (n.done ? " done" : "") + '"><span class="dot"></span><span class="t">' + esc(n.t) + "</span>" + (n.p ? '<span class="p">' + n.p + "</span>" : "") + "</div>").join("");
+  renderToday();
+
+  /* 拖动与边缘吸附 */
+  const SNAP = 18;
+  document.querySelectorAll("[data-drag]").forEach((h) => {
+    const st = h.closest(".sticky");
+    h.addEventListener("pointerdown", (e) => {
+      if (e.target.closest("button")) return;
+      const r = st.getBoundingClientRect();
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      st.classList.add("dragging");
+      h.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        const desk = $("desk").getBoundingClientRect();
+        let x = ev.clientX - dx, y = ev.clientY - dy;
+        x = Math.max(0, Math.min(desk.width - r.width, x));
+        y = Math.max(0, Math.min(desk.height - r.height, y));
+        if (x < SNAP) x = 0;
+        if (y < SNAP) y = 0;
+        if (desk.width - (x + r.width) < SNAP) x = desk.width - r.width;
+        if (desk.height - (y + r.height) < SNAP) y = desk.height - r.height;
+        st.style.left = x + "px"; st.style.top = y + "px";
+      };
+      const up = () => { st.classList.remove("dragging"); h.removeEventListener("pointermove", move); h.removeEventListener("pointerup", up); };
+      h.addEventListener("pointermove", move);
+      h.addEventListener("pointerup", up);
+    });
+    h.addEventListener("dblclick", () => { location.href = "主界面.html"; });
+  });
+
+  /* 工具按钮 */
+  const COLORS = [["amber", "#FFE7A6"], ["pink", "#F9C9D3"], ["blue", "#BFD6F5"], ["green", "#BDE3D1"], ["theme", "var(--surface)"]];
+  document.querySelectorAll(".sticky").forEach((st) => {
+    const sw = st.querySelector(".swatches");
+    sw.innerHTML = COLORS.map(([k, c]) => '<button data-color="' + k + '" title="' + (k === "theme" ? "跟随主题" : k) + '" style="background:' + c + '"></button>').join("");
+    const syncSw = () => sw.querySelectorAll("button").forEach((b) => b.classList.toggle("on", st.classList.contains("c-" + b.dataset.color)));
+    syncSw();
+    sw.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-color]");
+      if (!b) return;
+      COLORS.forEach(([k]) => st.classList.remove("c-" + k));
+      st.classList.add("c-" + b.dataset.color);
+      syncSw();
+    });
+    st.querySelector('[data-pop="alpha"] input').addEventListener("input", (e) => st.style.setProperty("--alpha", e.target.value / 100));
+    st.querySelector(".st-tools").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-act]");
+      if (!b) return;
+      const act = b.dataset.act;
+      const pops = st.querySelectorAll(".pop");
+      if (act === "color" || act === "alpha") {
+        const pop = st.querySelector('[data-pop="' + act + '"]');
+        const open = !pop.classList.contains("open");
+        pops.forEach((p) => p.classList.remove("open"));
+        pop.classList.toggle("open", open);
+        st.classList.toggle("menu-open", open);
+        return;
+      }
+      if (act === "pin") { b.classList.toggle("on"); toast(b.classList.contains("on") ? "便利贴已置顶" : "已取消置顶"); }
+      if (act === "lock") { st.classList.add("locked"); pops.forEach((p) => p.classList.remove("open")); toast("已锁定：鼠标可以穿透。需要解锁时，点右下角托盘图标。"); }
+      if (act === "open") location.href = "主界面.html";
+      if (act === "close") { st.style.display = "none"; toast("便利贴已隐藏，可以从托盘菜单重新打开"); }
+    });
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (e.target.closest(".pop, .st-tools")) return;
+    document.querySelectorAll(".pop.open").forEach((p) => { p.classList.remove("open"); p.closest(".sticky").classList.remove("menu-open"); });
+  });
+
+  /* 托盘 */
+  const menu = $("trayMenu");
+  $("trayBtn").addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("open"); $("trayBtn").classList.toggle("open"); });
+  document.addEventListener("click", (e) => { if (!menu.contains(e.target) && e.target !== $("trayBtn")) { menu.classList.remove("open"); $("trayBtn").classList.remove("open"); } });
+  let hidden = false;
+  $("trayToggle").addEventListener("click", () => {
+    hidden = !hidden;
+    document.querySelectorAll(".sticky").forEach((s) => (s.style.display = hidden ? "none" : ""));
+    $("trayToggle").querySelector("span").textContent = hidden ? "显示便利贴" : "隐藏便利贴";
+  });
+  $("trayUnlock").addEventListener("click", () => { document.querySelectorAll(".sticky.locked").forEach((s) => s.classList.remove("locked")); toast("已解锁所有便利贴"); menu.classList.remove("open"); });
+  $("trayNew").addEventListener("click", () => { toast("原型：会弹出选择项目的列表"); menu.classList.remove("open"); });
+
+  let tt;
+  function toast(msg) {
+    $("toastBody").textContent = msg;
+    $("toast").classList.add("show");
+    clearTimeout(tt);
+    tt = setTimeout(() => $("toast").classList.remove("show"), 2600);
+  }
+
+  function tick() {
+    const d = new Date();
+    $("clock").innerHTML = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0") + "<br>" + d.getFullYear() + "/" + (d.getMonth() + 1) + "/" + d.getDate();
+  }
+  tick(); setInterval(tick, 30000);
+  window.Cicada.mountIcons();
+})();
+</script>
+</body>
+</html>

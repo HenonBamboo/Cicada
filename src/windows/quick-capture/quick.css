@@ -1,0 +1,66 @@
+html[data-window="quick"] body {
+  background: transparent;
+}
+.capture {
+  padding: 8px;
+}
+.cap-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 60px;
+  padding: 0 10px 0 16px;
+  border-radius: var(--r-input);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--pop-shadow);
+  backdrop-filter: var(--glass-blur);
+}
+.cap-box img {
+  width: 22px;
+  height: 22px;
+  flex: none;
+}
+.cap-box input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 1.14rem;
+}
+.cap-box input::placeholder {
+  color: var(--text-3);
+}
+.cap-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 0 6px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+.cap-hint kbd {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 16px;
+}
+.capture-error {
+  color: var(--danger);
+  font-size: 0.78rem;
+  margin: 4px 6px 0;
+  overflow-wrap: anywhere;
+}
+.capture-attachments {
+  border: 0;
+  padding: 0 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.78rem;
+}

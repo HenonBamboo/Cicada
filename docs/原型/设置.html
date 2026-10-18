@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知了 · 设置原型</title>
+<link rel="icon" href="../../assets/logo/logo-small.svg">
+<link rel="stylesheet" href="shared/theme.css">
+<script src="shared/theme.js"></script>
+<style>
+  .app { height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  .titlebar { height: 40px; flex: none; display: flex; align-items: center; gap: 6px; padding-left: 8px; user-select: none; }
+  .titlebar .t { font-size: 0.9rem; color: var(--text-2); }
+  .tb-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+  .tb-actions .proto-badge { margin-right: 6px; }
+  .tb-sep { width: 1px; height: 16px; background: var(--border); margin: 0 6px; }
+  .win-btn { width: 44px; height: 40px; border: 0; background: transparent; color: var(--text-2); display: grid; place-items: center; }
+  .win-btn:hover { background: var(--surface-2); color: var(--text); }
+  .win-btn.close:hover { background: #E81123; color: #fff; }
+  .win-btn .icon { width: 15px; height: 15px; }
+  .back .icon { transform: rotate(180deg); }
+
+  .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: 200px 1fr; }
+  nav { padding: 8px 10px 16px 14px; overflow: auto; }
+  nav a { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: var(--r-md); color: var(--text-2); text-decoration: none; font-size: 0.93rem; transition: background 0.15s, color 0.15s; }
+  nav a:hover { background: var(--surface-2); color: var(--text); }
+  nav a.on { background: var(--accent-soft); color: var(--accent); }
+  nav a .icon { width: 16px; height: 16px; }
+
+  .content { overflow: auto; padding: 4px 28px 60px 18px; scroll-behavior: smooth; }
+  .inner { max-width: 680px; }
+  section { padding-top: 18px; }
+  section h2 { margin: 0 0 10px 2px; font-family: var(--font-title, var(--font-ui)); font-size: 1.12rem; font-weight: 500; }
+  .group { padding: 2px 18px; }
+  .row { display: flex; align-items: center; gap: 16px; min-height: 58px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: 0; }
+  .row .lab { flex: 1; min-width: 0; }
+  .row .lab b { display: block; font-weight: 400; font-size: 0.95rem; }
+  .row .lab small { display: block; font-size: 0.8rem; color: var(--text-3); margin-top: 1px; }
+  .row.col { flex-direction: column; align-items: stretch; gap: 10px; }
+
+  .field { height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); outline: 0; font-size: 0.9rem; transition: border-color 0.15s; }
+  .field:focus { border-color: var(--accent); }
+  [data-theme="glass"] .field { background: rgba(255, 255, 255, 0.7); }
+  .field.wide { width: 280px; }
+  select.field { padding-right: 6px; }
+  .key-wrap { display: flex; gap: 6px; align-items: center; }
+  .ok { font-size: 0.82rem; color: var(--accent); display: inline-flex; align-items: center; gap: 4px; }
+
+  .switch { position: relative; width: 38px; height: 22px; flex: none; }
+  .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .switch span { position: absolute; inset: 0; border-radius: 999px; background: var(--border-strong); transition: background 0.2s; pointer-events: none; }
+  .switch span::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.2s var(--ease); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::after { transform: translateX(16px); }
+
+  .themes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .theme-card { padding: 0; border: 1px solid var(--border); border-radius: var(--r-md); background: transparent; text-align: left; overflow: hidden; transition: border-color 0.15s; }
+  .theme-card:hover { border-color: var(--border-strong); }
+  .theme-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .theme-card .pv { height: 74px; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .theme-card .pv i { display: block; height: 8px; border-radius: 4px; }
+  .theme-card .pv .pc { height: 30px; border-radius: 6px; margin-top: auto; display: flex; align-items: center; gap: 6px; padding: 0 8px; }
+  .theme-card .pv .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .theme-card .nm { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px; font-size: 0.86rem; border-top: 1px solid var(--border); }
+  .theme-card .nm .icon { color: var(--accent); visibility: hidden; }
+  .theme-card.on .nm .icon { visibility: visible; }
+
+  .accents { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .accents button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, 0.1); }
+  .accents button.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .accents .auto { width: auto; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-2); color: var(--text-2); font-size: 0.8rem; border: 0; }
+  .accents input[type="color"] { width: 26px; height: 26px; padding: 0; border: 0; background: none; cursor: pointer; }
+  .range { width: 200px; accent-color: var(--accent); }
+
+  .kbd { display: inline-flex; align-items: center; gap: 4px; }
+  .kbd span { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border-strong); border-bottom-width: 2px; background: var(--surface); font-family: var(--font-mono); font-size: 0.8rem; }
+  .kbd-btn { border: 1px dashed transparent; background: transparent; border-radius: var(--r-sm); padding: 4px; }
+  .kbd-btn:hover { border-color: var(--border-strong); }
+  .kbd-btn.rec { border-color: var(--accent); }
+
+  .pr-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pr-tabs button { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 999px; background: transparent; color: var(--text-2); font-size: 0.82rem; }
+  .pr-tabs button:hover { border-color: var(--border-strong); color: var(--text); }
+  .pr-tabs button.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+  .pr-tabs button.mod::after { content: "·已修改"; margin-left: 4px; color: var(--text-3); }
+  .pr-edit { width: 100%; min-height: 168px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text); font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.6; resize: vertical; outline: 0; box-sizing: border-box; }
+  .pr-edit:focus { border-color: var(--accent); }
+  .pr-edit[readonly] { background: var(--surface-2); color: var(--text-2); }
+  [data-theme="glass"] .pr-edit:not([readonly]) { background: rgba(255, 255, 255, 0.7); }
+  .pr-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-3); }
+  .pr-meta code { font-family: var(--font-mono); font-size: 0.76rem; padding: 1px 6px; border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-2); }
+  .list { width: 100%; border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; }
+  .list .li { display: flex; align-items: center; gap: 12px; padding: 9px 12px; font-size: 0.88rem; border-bottom: 1px solid var(--border); }
+  .list .li:last-child { border-bottom: 0; }
+  .list .li .m { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-3); }
+  .list .li .grow { flex: 1; min-width: 0; }
+  .list .li .btn { height: 26px; padding: 0 10px; font-size: 0.8rem; }
+  .path { font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-2); background: var(--surface-2); padding: 4px 8px; border-radius: var(--r-sm); }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .about { display: flex; align-items: center; gap: 16px; padding: 18px 0; }
+  .about img { width: 56px; height: 56px; }
+  .about b { font-size: 1.1rem; font-weight: 500; display: block; }
+  .about small { color: var(--text-3); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="titlebar">
+    <a class="icon-btn back" href="主界面.html" title="返回" data-icon="chevron-right"></a>
+    <span class="t">设置</span>
+    <div class="tb-actions">
+      <span class="proto-badge">原型</span>
+      <span data-theme-switcher></span>
+      <span class="tb-sep"></span>
+      <button class="win-btn" data-icon="minus"></button>
+      <button class="win-btn" data-icon="square"></button>
+      <button class="win-btn close" data-icon="x"></button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav id="nav">
+      <a href="#model" data-icon="sparkles">模型</a>
+      <a href="#prompts" data-icon="message">提示词</a>
+      <a href="#time" data-icon="clock">时间</a>
+      <a href="#look" data-icon="sun">外观</a>
+      <a href="#sticky" data-icon="sticky">便利贴</a>
+      <a href="#keys" data-icon="keyboard">快捷键</a>
+      <a href="#startup" data-icon="power">启动</a>
+      <a href="#report" data-icon="file">报告</a>
+      <a href="#data" data-icon="database">数据</a>
+      <a href="#about" data-icon="info">关于</a>
+    </nav>
+
+    <div class="content" id="content"><div class="inner">
+
+      <section id="model">
+        <h2>模型</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>服务商</b><small>兼容 OpenAI 格式的接口都可以接入</small></div>
+            <select class="field wide" id="provider">
+              <option>DeepSeek</option><option>通义千问</option><option>Kimi（月之暗面）</option><option>智谱 GLM</option><option>Claude</option><option>自定义（OpenAI 兼容）</option>
+            </select></div>
+          <div class="row"><div class="lab"><b>Base URL</b></div><input class="field wide" id="baseUrl" value="https://api.deepseek.com/v1"></div>
+          <div class="row"><div class="lab"><b>API Key</b><small>保存在 Windows 凭据管理器，不会明文写入文件</small></div>
+            <div class="key-wrap"><input class="field" style="width: 230px" type="password" value="example-key" aria-label="API Key"><button class="icon-btn" data-icon="eye" title="显示"></button></div></div>
+          <div class="row"><div class="lab"><b>对话模型</b><small>需要支持工具调用</small></div><select class="field wide"><option>deepseek-chat</option><option>deepseek-reasoner</option></select></div>
+          <div class="row"><div class="lab"><b>识图模型</b><small>用于识别截图和照片，可以和对话模型不同</small></div><select class="field wide"><option>qwen-vl-max（通义千问）</option><option>与对话模型相同</option></select></div>
+          <div class="row"><div class="lab"><b>连接测试</b><small id="testMsg">还没有测试过</small></div><button class="btn" id="testBtn" data-icon="zap"> 测试连接</button></div>
+        </div>
+      </section>
+
+      <section id="prompts">
+        <h2>提示词</h2>
+        <div class="card group">
+          <div class="row col"><div class="lab"><b>内部提示词</b><small>知了怎么理解你、怎么回答，都写在这里，可以按自己的习惯调整。改提示词不会放宽权限：能改哪些数据始终由程序校验。</small></div>
+            <div class="pr-tabs" id="prTabs"></div>
+            <textarea class="pr-edit" id="prEdit" spellcheck="false" aria-label="提示词内容"></textarea>
+            <div class="pr-meta"><span>可用变量</span><code>{{now}}</code><code>{{business_date}}</code><code>{{day_cutoff}}</code><code>{{week_start}}</code><code>{{mode}}</code><span id="prState" style="margin-left: auto"></span></div>
+            <div class="btns"><button class="btn" id="prPreview" data-icon="eye"> 预览完整提示词</button><button class="btn" id="prReset" data-icon="undo"> 恢复默认</button><button class="btn" data-icon="folder"> 打开文件夹</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="time">
+        <h2>时间</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>日切时间</b><small>过了这个时间才算"新的一天"，夜猫子可以设晚一点</small></div><input class="field" type="time" value="04:00"></div>
+          <div class="row"><div class="lab"><b>每周从哪天开始</b><small>影响周报的统计范围</small></div><div class="seg"><button class="on">周一</button><button>周日</button></div></div>
+          <div class="row"><div class="lab"><b>每日回顾</b><small>每晚提醒一次：今天完成了几件，明天要做什么</small></div><input class="field" type="time" value="21:30" style="margin-right: 8px"><label class="switch"><input type="checkbox" checked><span></span></label></div>
+        </div>
+      </section>
+
+      <section id="look">
+        <h2>外观</h2>
+        <div class="card group">
+          <div class="row col"><div class="lab"><b>主题</b></div><div class="themes" id="themes"></div></div>
+          <div class="row"><div class="lab"><b>强调色</b><small>按钮、勾选框、热力图都会跟着变</small></div><div class="accents" id="accents"></div></div>
+          <div class="row"><div class="lab"><b>字号</b></div><div class="seg" id="fsSeg"><button data-v="small">小</button><button data-v="medium">中</button><button data-v="large">大</button></div></div>
+          <div class="row"><div class="lab"><b>圆角</b></div><div class="seg" id="rSeg"><button data-v="small">小</button><button data-v="medium">中</button><button data-v="large">大</button></div></div>
+          <div class="row"><div class="lab"><b>动效</b><small>关闭后所有过渡都会变成瞬时的</small></div><label class="switch"><input type="checkbox" id="motion"><span></span></label></div>
+        </div>
+      </section>
+
+      <section id="sticky">
+        <h2>便利贴</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>默认颜色</b></div><div class="accents" id="stColors"></div></div>
+          <div class="row"><div class="lab"><b>透明度</b></div><input class="range" type="range" min="55" max="100" value="90"></div>
+          <div class="row"><div class="lab"><b>贴边自动隐藏</b><small>拖到屏幕边缘后收起，鼠标靠近时再滑出</small></div><label class="switch"><input type="checkbox"><span></span></label></div>
+          <div class="row"><div class="lab"><b>启动时显示便利贴</b></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+        </div>
+      </section>
+
+      <section id="keys">
+        <h2>快捷键</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>快速记录</b><small>在任何软件里都能唤起输入条</small></div><button class="kbd-btn" title="点击后按下新的组合键"><span class="kbd"><span>Alt</span>+<span>Space</span></span></button></div>
+          <div class="row"><div class="lab"><b>显示 / 隐藏主窗口</b></div><button class="kbd-btn" title="点击后按下新的组合键"><span class="kbd"><span>Ctrl</span>+<span>Alt</span>+<span>Z</span></span></button></div>
+          <div class="row"><div class="lab"><b>显示 / 隐藏便利贴</b></div><button class="kbd-btn" title="点击后按下新的组合键"><span class="kbd"><span>Ctrl</span>+<span>Alt</span>+<span>S</span></span></button></div>
+        </div>
+      </section>
+
+      <section id="startup">
+        <h2>启动</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>开机自动启动</b></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+          <div class="row"><div class="lab"><b>关闭主窗口时</b></div><div class="seg"><button class="on">缩到托盘</button><button>退出知了</button></div></div>
+        </div>
+      </section>
+
+      <section id="report">
+        <h2>报告</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>自动生成周报</b><small>每周第一天日切后生成上一周的报告</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+          <div class="row"><div class="lab"><b>自动生成月报</b></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+          <div class="row"><div class="lab"><b>自动生成年报</b></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+        </div>
+      </section>
+
+      <section id="data">
+        <h2>数据</h2>
+        <div class="card group">
+          <div class="row"><div class="lab"><b>数据目录</b><small>数据保存在这台电脑上；使用 AI 功能时，会把本次请求所需的文字或图片发送给所选服务商</small></div><span class="path">%APPDATA%\Cicada</span><button class="btn" data-icon="folder"> 打开</button></div>
+          <div class="row"><div class="lab"><b>导出与导入</b></div><div class="btns"><button class="btn" data-icon="download"> 导出 Markdown</button><button class="btn" data-icon="download"> 导出 JSON</button><button class="btn" data-icon="upload"> 导入</button></div></div>
+          <div class="row col"><div class="lab"><b>自动备份</b><small>每天备份一次（含数据库、报告、设置和提示词，不含 API Key），保留最近 30 份。恢复前会先备份当前数据。</small></div>
+            <div class="list">
+              <div class="li"><span class="grow">2026-10-17 08:42</span><span class="m">1.2 MB</span><button class="btn">恢复</button></div>
+              <div class="li"><span class="grow">2026-10-16 09:05</span><span class="m">1.2 MB</span><button class="btn">恢复</button></div>
+              <div class="li"><span class="grow">2026-10-15 08:31</span><span class="m">1.1 MB</span><button class="btn">恢复</button></div>
+            </div></div>
+          <div class="row col"><div class="lab"><b>操作日志</b><small>只读。所有修改都记录在这里，可以在主界面说"撤销"回退。</small></div>
+            <div class="list">
+              <div class="li"><span class="m">22:41</span><span class="grow">完成「跑步 30 分钟」</span><span class="chip">手动勾选</span></div>
+              <div class="li"><span class="m">22:15</span><span class="grow">添加「下午 3 点产品评审会议」，15:00 提醒</span><span class="chip accent">对话</span></div>
+              <div class="li"><span class="m">21:58</span><span class="grow">把「便利贴」标记为完成（知了 › 阶段 0）</span><span class="chip accent">对话</span></div>
+              <div class="li"><span class="m">21:30</span><span class="grow">删除「周六去超市」</span><span class="chip accent">对话</span></div>
+            </div></div>
+        </div>
+      </section>
+
+      <section id="about">
+        <h2>关于</h2>
+        <div class="card group">
+          <div class="about"><img src="../../assets/logo/logo.svg" alt=""><div><b>知了</b><small>版本 0.1.0 · 你只管说，它来整理</small></div><button class="btn" style="margin-left: auto" data-icon="refresh"> 检查更新</button></div>
+        </div>
+      </section>
+
+    </div></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const C = window.Cicada;
+  const $ = (id) => document.getElementById(id);
+
+  /* 主题卡片：预览颜色写死，展示的是各主题本身的样子 */
+  const PV = {
+    system: { bg: "linear-gradient(90deg,#F7F8F7 50%,#16191A 50%)", line: "#C9D2CF", card: "rgba(127,127,127,0.18)", dot: "#16796F" },
+    light: { bg: "#F7F8F7", line: "#DDE3E0", card: "#FFFFFF", dot: "#16796F" },
+    dark: { bg: "#16191A", line: "#2F3637", card: "#1E2223", dot: "#3FB3A2" },
+    paper: { bg: "#F4EFE6", line: "#E3D8C5", card: "#FBF8F2", dot: "#9A6B2F" },
+    glass: { bg: "radial-gradient(at 20% 25%,#BFE3D8,transparent 60%),radial-gradient(at 85% 80%,#F6D9B8,transparent 60%),#E9EEEC", line: "rgba(255,255,255,0.7)", card: "rgba(255,255,255,0.6)", dot: "#16796F" },
+    forest: { bg: "#17211E", line: "#2C3A35", card: "#1E2A26", dot: "#7CCBA2" },
+  };
+  function renderThemes() {
+    $("themes").innerHTML = C.THEMES.map((t) => {
+      const p = PV[t.id];
+      return '<button class="theme-card' + (C.prefs.theme === t.id ? " on" : "") + '" data-theme-id="' + t.id + '">' +
+        '<div class="pv" style="background:' + p.bg + '"><i style="width:60%;background:' + p.line + '"></i><i style="width:38%;background:' + p.line + '"></i>' +
+        '<div class="pc" style="background:' + p.card + '"><span class="dot" style="background:' + p.dot + '"></span><i style="flex:1;height:6px;background:' + p.line + '"></i></div></div>' +
+        '<div class="nm">' + t.name + C.icon("check") + "</div></button>";
+    }).join("");
+  }
+  $("themes").addEventListener("click", (e) => { const b = e.target.closest("[data-theme-id]"); if (b) C.setPref("theme", b.dataset.themeId); });
+
+  const ACCENTS = [["#16796F", "蝉绿"], ["#B7791F", "琥珀"], ["#4F5BD5", "靛蓝"], ["#C2457A", "玫红"], ["#4B5563", "石墨"]];
+  function renderAccents() {
+    $("accents").innerHTML = '<button class="auto' + (!C.prefs.accent ? " on" : "") + '" data-accent="">跟随主题</button>' +
+      ACCENTS.map(([c, n]) => '<button title="' + n + '" data-accent="' + c + '" class="' + (C.prefs.accent === c ? "on" : "") + '" style="background:' + c + '"></button>').join("") +
+      '<input type="color" title="自定义" value="' + (C.prefs.accent || "#16796F") + '">';
+  }
+  $("accents").addEventListener("click", (e) => { const b = e.target.closest("[data-accent]"); if (b) C.setPref("accent", b.dataset.accent || null); });
+  $("accents").addEventListener("input", (e) => { if (e.target.type === "color") C.setPref("accent", e.target.value); });
+
+  function bindSeg(id, key) {
+    const seg = $(id);
+    seg.addEventListener("click", (e) => { const b = e.target.closest("[data-v]"); if (b) C.setPref(key, b.dataset.v); });
+    return () => seg.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === C.prefs[key]));
+  }
+  const syncFs = bindSeg("fsSeg", "fontsize");
+  const syncR = bindSeg("rSeg", "radius");
+  $("motion").addEventListener("change", (e) => C.setPref("motion", e.target.checked ? "on" : "off"));
+
+  $("stColors").innerHTML = [["#FFE7A6", "黄"], ["#F9C9D3", "粉"], ["#BFD6F5", "蓝"], ["#BDE3D1", "绿"]].map(([c, n], i) => '<button title="' + n + '" class="' + (i === 0 ? "on" : "") + '" style="background:' + c + '"></button>').join("") + '<button class="auto">跟随主题</button>';
+  $("stColors").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; $("stColors").querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b)); });
+
+  /* 通用：分段按钮的选中态 */
+  document.querySelectorAll(".seg:not(#fsSeg):not(#rSeg)").forEach((seg) => seg.addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    seg.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+
+  /* 快捷键录制（原型：只演示状态） */
+  document.querySelectorAll(".kbd-btn").forEach((b) => b.addEventListener("click", () => {
+    const rec = b.classList.toggle("rec");
+    b.dataset.old = b.dataset.old || b.innerHTML;
+    b.innerHTML = rec ? '<span class="kbd"><span>请按下新的组合键…</span></span>' : b.dataset.old;
+  }));
+
+  $("provider").addEventListener("change", (e) => {
+    const urls = { DeepSeek: "https://api.deepseek.com/v1", 通义千问: "https://dashscope.aliyuncs.com/compatible-mode/v1", "Kimi（月之暗面）": "https://api.moonshot.cn/v1", "智谱 GLM": "https://open.bigmodel.cn/api/paas/v4", Claude: "https://api.anthropic.com/v1" };
+    $("baseUrl").value = urls[e.target.value] || "";
+  });
+  $("testBtn").addEventListener("click", () => {
+    $("testMsg").textContent = "正在测试…";
+    setTimeout(() => { $("testMsg").innerHTML = '<span class="ok">' + C.icon("check") + "连接正常 · 312 ms · 支持工具调用</span>"; }, 800);
+  });
+
+  /* 提示词（模拟数据） */
+  const PROMPTS = [
+    { id: "base", name: "通用角色", def: "你是「知了」，用户的个人任务与项目助手。\n- 用户只管说，你来整理：只通过提供的工具读写数据。\n- 每次执行完用一句以「知了」开头的话回应，简短，不说教。\n- 只处理任务和项目的增删改查、提醒、总结；其他请求礼貌拒绝，并说明你能做什么。\n- 匹配到多条或信息不全时，先用 ask_clarify 追问，不要猜。\n\n现在是 {{now}}，业务日期 {{business_date}}（日切时间 {{day_cutoff}}）。" },
+    { id: "task", name: "任务模式", def: "当前是任务模式。\n- 没说日期的任务默认安排在 {{business_date}}。\n- 「下午三点提醒我」= 当天 15:00 的提醒时间。\n- 「每周一」「每个工作日」这类说法用 recur_* 工具建立重复规则。\n- 内容明显是项目结构时，询问是否切换到项目模式。" },
+    { id: "project", name: "项目模式", def: "当前是项目模式。\n- 项目最多三层（含项目本身），超过时说明原因并建议合并层级。\n- 节点标题用动宾短语，简短明确。" },
+    { id: "vision", name: "图片识别", def: "把图片中的待办、清单或结构逐条转写成文字，保留层级和日期，不要添加图片中没有的内容。" },
+    { id: "summary", name: "总结", def: "按「完成了什么 / 还剩什么 / 值得注意」三段输出 Markdown，每段不超过 5 条。" },
+    { id: "report", name: "周报 / 月报 / 年报", def: "基于归档数据写一份回顾：概览数字、主要完成、项目进展、延期较多的事项。语气平和，不评判。" },
+    { id: "greet", name: "问候语", def: "根据时间段、今日剩余任务数和连续完成天数，写一句不超过 20 字的问候，带一点「知了」的回应感。" }
+  ];
+  const edited = { task: PROMPTS[1].def + "\n- 我习惯把「下班前」理解为 18:00。" };
+  let cur = "base", previewing = false;
+  function renderPrompts() {
+    $("prTabs").innerHTML = PROMPTS.map((p) => '<button data-id="' + p.id + '" class="' + (p.id === cur ? "on" : "") + (edited[p.id] ? " mod" : "") + '">' + p.name + "</button>").join("");
+    const p = PROMPTS.find((x) => x.id === cur);
+    const ed = $("prEdit");
+    if (previewing) {
+      ed.readOnly = true;
+      ed.value = "【通用角色】\n" + (edited.base || PROMPTS[0].def) + "\n\n【任务模式】\n" + (edited.task || PROMPTS[1].def) + "\n\n【程序生成 · 不可编辑】\n工具定义：task_add, task_update, task_delete, task_set_done, task_query, summarize, ask_clarify, undo_last …\n本轮上下文：今日剩余 2 件、遗留 1 件";
+      $("prState").textContent = "预览：变量已按当前时间填充";
+    } else {
+      ed.readOnly = false;
+      ed.value = edited[cur] || p.def;
+      $("prState").textContent = edited[cur] ? "已修改，下一轮对话起生效" : "默认版本";
+    }
+    $("prPreview").lastChild.textContent = previewing ? " 返回编辑" : " 预览完整提示词";
+  }
+  $("prTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-id]"); if (b) { cur = b.dataset.id; previewing = false; renderPrompts(); } });
+  $("prEdit").addEventListener("input", (e) => { if (previewing) return; const p = PROMPTS.find((x) => x.id === cur); if (e.target.value === p.def) delete edited[cur]; else edited[cur] = e.target.value; $("prState").textContent = edited[cur] ? "已修改，下一轮对话起生效" : "默认版本"; $("prTabs").querySelector('[data-id="' + cur + '"]').classList.toggle("mod", !!edited[cur]); });
+  $("prReset").addEventListener("click", () => { delete edited[cur]; previewing = false; renderPrompts(); });
+  $("prPreview").addEventListener("click", () => { previewing = !previewing; renderPrompts(); });
+  renderPrompts();
+
+  /* 导航高亮 */
+  const links = [...$("nav").querySelectorAll("a")];
+  const secs = links.map((a) => document.querySelector(a.getAttribute("href")));
+  function spy() {
+    const top = $("content").getBoundingClientRect().top + 40;
+    let cur = secs[0];
+    secs.forEach((s) => { if (s.getBoundingClientRect().top <= top) cur = s; });
+    if ($("content").scrollTop + $("content").clientHeight >= $("content").scrollHeight - 4) cur = secs[secs.length - 1];
+    links.forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + cur.id));
+  }
+  $("content").addEventListener("scroll", spy);
+  links.forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); document.querySelector(a.getAttribute("href")).scrollIntoView({ behavior: "smooth" }); }));
+
+  function sync() { renderThemes(); renderAccents(); syncFs(); syncR(); $("motion").checked = C.prefs.motion !== "off"; }
+  document.addEventListener("cicada:prefs", sync);
+  sync(); spy();
+})();
+</script>
+</body>
+</html>
