@@ -6,7 +6,7 @@ export function nodeDeadline(at: string): string {
   return `${monthDay(at)}${at.length > 10 ? ` ${timeOf(at)}` : ""}`;
 }
 
-/** 名称与记录信息只用于原生悬停提示，不增加列表内容。 */
+/** 名称与记录信息只用于悬停详情，不增加列表内容。 */
 export function itemDescription(
   item: Pick<ProjectNode, "title" | "note" | "dueAt" | "createdAt" | "doneAt" | "done">,
 ): string {

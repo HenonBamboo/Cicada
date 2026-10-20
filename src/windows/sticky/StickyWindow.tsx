@@ -37,7 +37,7 @@ function ProjectTree({ node }: { node: ProjectNode }) {
     <>
       <div
         className={`st-node l${node.depth}${node.done ? " done" : ""}`}
-        title={itemDescription(node)}
+        data-item-details={itemDescription(node)}
       >
         <span className="dot" />
         <span className="t">
@@ -68,7 +68,7 @@ function Task({
   return (
     <div
       className={`st-task${task.done ? " is-done" : ""}${flash ? " flash" : ""}`}
-      title={itemDescription(task)}
+      data-item-details={itemDescription(task)}
     >
       <Check
         on={task.done}
@@ -202,7 +202,7 @@ export function StickyWindow() {
       >
         <span
           className="st-title"
-          title={
+          data-item-details={
             state?.kind === "project" && board?.project ? itemDescription(board.project) : undefined
           }
         >

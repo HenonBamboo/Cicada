@@ -12,6 +12,98 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const RETRY_SECONDS: i64 = 300;
+// 默认示例与近期记录一起组成候选；具体内容可以随记录变化，操作始终对应现有工具。
+const TASK_EXAMPLES: [&str; 3] = [
+    "比如：明天下午三点提醒我交周报",
+    "比如：记下今天要整理会议纪要",
+    "比如：列出今天还没完成的任务",
+];
+const PROJECT_EXAMPLES: [&str; 3] = [
+    "比如：新建一个项目：网站改版",
+    "比如：新建读书计划项目，添加一个阶段：整理书单",
+    "比如：列出当前进行中的项目",
+];
+fn supported_example(value: &str, choices: &[&str]) -> String {
+    choices
+        .iter()
+        .find(|choice| **choice == value.trim())
+        .unwrap_or(&choices[0])
+        .to_string()
+}
+struct ExampleChoices {
+    tasks: Vec<String>,
+    projects: Vec<String>,
+}
+impl Default for ExampleChoices {
+    fn default() -> Self {
+        Self {
+            tasks: TASK_EXAMPLES.iter().map(|s| (*s).into()).collect(),
+            projects: PROJECT_EXAMPLES.iter().map(|s| (*s).into()).collect(),
+        }
+    }
+}
+impl ExampleChoices {
+    fn task(&self, value: &str) -> String {
+        supported_example(
+            value,
+            &self.tasks.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+    }
+    fn project(&self, value: &str) -> String {
+        supported_example(
+            value,
+            &self.projects.iter().map(String::as_str).collect::<Vec<_>>(),
+        )
+    }
+}
+fn example_choices(conn: &Connection) -> AppResult<ExampleChoices> {
+    let mut examples = ExampleChoices::default();
+    // 标题作为参数放进明确的记事/查询命令，不把其内容当成新的产品能力。
+    let usable = |title: &str| {
+        !title.trim().is_empty()
+            && title.chars().count() <= 28
+            && !title.contains(['\n', '\r', '「', '」', '<', '>'])
+            && !["http://", "https://", "耗时", "计时", "自动撰写"]
+                .iter()
+                .any(|s| title.contains(s))
+    };
+    for (sql, completed) in [
+        ("SELECT title FROM tasks ORDER BY id DESC LIMIT 3", false),
+        (
+            "SELECT title FROM completions WHERE kind='task' ORDER BY id DESC LIMIT 3",
+            true,
+        ),
+    ] {
+        let mut stmt = conn.prepare(sql)?;
+        for title in stmt.query_map([], |r| r.get::<_, String>(0))? {
+            let title = title?;
+            if usable(&title) {
+                let example = if completed {
+                    format!("比如：添加任务：跟进{}", title.trim())
+                } else {
+                    format!("比如：查询任务「{}」的状态", title.trim())
+                };
+                if !examples.tasks.contains(&example) {
+                    examples.tasks.push(example);
+                }
+            }
+        }
+    }
+    let mut stmt = conn.prepare("SELECT title FROM nodes WHERE depth=1 AND project_status='active' ORDER BY id DESC LIMIT 3")?;
+    for title in stmt.query_map([], |r| r.get::<_, String>(0))? {
+        let title = title?;
+        if usable(&title) {
+            examples
+                .projects
+                .push(format!("比如：查看「{}」项目的进度", title.trim()));
+            examples.projects.push(format!(
+                "比如：给「{}」添加节点：整理下一步安排",
+                title.trim()
+            ));
+        }
+    }
+    Ok(examples)
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GreetingView {
@@ -57,7 +149,11 @@ struct GeneratedCopy {
     task_empty: String,
     project_empty: String,
 }
-fn parse_copy(text: &str, fallback: &GreetingView) -> Option<GreetingView> {
+fn parse_copy(
+    text: &str,
+    fallback: &GreetingView,
+    examples: &ExampleChoices,
+) -> Option<GreetingView> {
     let raw = text
         .trim()
         .strip_prefix("```json")
@@ -103,8 +199,8 @@ fn parse_copy(text: &str, fallback: &GreetingView) -> Option<GreetingView> {
         text: copy.greeting.trim().into(),
         nudge: fallback.nudge.clone(),
         generated: true,
-        task_placeholder: copy.task_placeholder.trim().into(),
-        project_placeholder: copy.project_placeholder.trim().into(),
+        task_placeholder: examples.task(&copy.task_placeholder),
+        project_placeholder: examples.project(&copy.project_placeholder),
         task_empty: copy.task_empty.trim().into(),
         project_empty: copy.project_empty.trim().into(),
     })
@@ -115,6 +211,7 @@ struct Context {
     fingerprint: String,
     input: String,
     fallback: GreetingView,
+    examples: ExampleChoices,
 }
 fn slot(hour: u32) -> &'static str {
     match hour {
@@ -196,8 +293,8 @@ fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult
         },
         nudge,
         generated: false,
-        task_placeholder: "说点什么，比如：明天下午三点提醒我交周报".into(),
-        project_placeholder: "比如：给「知了」加一个阶段：打包发布".into(),
+        task_placeholder: TASK_EXAMPLES[0].into(),
+        project_placeholder: PROJECT_EXAMPLES[0].into(),
         task_empty: "今天还没有任务，说一句就能记下。".into(),
         project_empty: "还没有项目，说一句就能开始。".into(),
     };
@@ -221,18 +318,20 @@ fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult
     let projects = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"completedMilestones":milestones,"milestonePolicy":"completedMilestones 是已发生的完成进展，只可回顾肯定，不是待办，不可提醒再做。里程碑只使用项目名称和 progress 表达，不引用具体子任务。项目未勾选完成时只能称为阶段性完成，即使全部子节点已经完成。greeting 不使用别忘了、记得、抓紧等催办表达，未完成任务的提醒另有确定性副标题。","activeProjects":projects,"longDelayedTask":stale.map(|task|json!({"title":task.title,"days":task.delay_days}))}).to_string();
+    let examples = example_choices(conn)?;
+    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"completedMilestones":milestones,"milestonePolicy":"completedMilestones 是已发生的完成进展，只可回顾肯定，不是待办，不可提醒再做。里程碑只使用项目名称和 progress 表达，不引用具体子任务。项目未勾选完成时只能称为阶段性完成，即使全部子节点已经完成。greeting 不使用别忘了、记得、抓紧等催办表达，未完成任务的提醒另有确定性副标题。","allowedTaskExamples":&examples.tasks,"allowedProjectExamples":&examples.projects,"examplePolicy":"allowedTaskExamples、allowedProjectExamples 同时包含默认示例和根据近期任务、完成记录、进行中项目整理的个性化示例。优先选择与近期内容相关的候选，并原样填入 taskPlaceholder 和 projectPlaceholder；无合适历史时使用默认项。这些示例是产品已支持的操作；不暗示代写内容、预计耗时、计时、费用收支等能力。","activeProjects":projects,"longDelayedTask":stale.map(|task|json!({"title":task.title,"days":task.delay_days}))}).to_string();
     let mut digest = Sha256::new();
     digest.update(input.as_bytes());
     digest.update(crate::prompts::load(&state.paths.prompts(), PromptId::Greeting).as_bytes());
     digest.update(serde_json::to_vec(&config.model.chat)?);
-    let fingerprint = format!("ui-v2:{:x}", digest.finalize());
+    let fingerprint = format!("ui-v3:{:x}", digest.finalize());
     Ok(Context {
         date: today.to_string(),
         slot: time_slot,
         fingerprint,
         input,
         fallback,
+        examples,
     })
 }
 fn cached(conn: &Connection, ctx: &Context, now: NaiveDateTime) -> AppResult<Option<GreetingView>> {
@@ -292,7 +391,7 @@ pub async fn get(state: &AppState) -> AppResult<GreetingView> {
     let response = generate(state, &config, PromptId::Greeting, ctx.input.clone()).await;
     let view = response
         .ok()
-        .and_then(|text| parse_copy(&text, &ctx.fallback))
+        .and_then(|text| parse_copy(&text, &ctx.fallback, &ctx.examples))
         .unwrap_or_else(|| ctx.fallback.clone());
     let generated = view.generated;
     let now = state
@@ -315,6 +414,31 @@ pub async fn get(state: &AppState) -> AppResult<GreetingView> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 示例融合近期记录且不能变成未实现的能力() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE tasks(id INTEGER,title TEXT); CREATE TABLE completions(id INTEGER,title TEXT,kind TEXT); CREATE TABLE nodes(id INTEGER,title TEXT,depth INTEGER,project_status TEXT);
+          INSERT INTO tasks VALUES(1,'整理会议纪要'); INSERT INTO completions VALUES(1,'提交基金材料','task'); INSERT INTO nodes VALUES(1,'机械光瓦',1,'active');").unwrap();
+        let choices = example_choices(&conn).unwrap();
+        assert_eq!(choices.tasks[0], TASK_EXAMPLES[0]);
+        assert_eq!(
+            choices.task("比如：查询任务「整理会议纪要」的状态"),
+            "比如：查询任务「整理会议纪要」的状态"
+        );
+        assert!(
+            choices
+                .tasks
+                .contains(&"比如：添加任务：跟进提交基金材料".into())
+        );
+        assert_eq!(
+            choices.project("比如：查看「机械光瓦」项目的进度"),
+            "比如：查看「机械光瓦」项目的进度"
+        );
+        assert_eq!(
+            choices.task("例如：撰写周报初稿，预计耗时一小时"),
+            TASK_EXAMPLES[0]
+        );
+    }
     #[test]
     fn 里程碑按项目勾选状态汇总且不暴露子任务() {
         let conn = Connection::open_in_memory().unwrap();
@@ -343,6 +467,7 @@ mod tests {
 
     #[test]
     fn 文案包必须完整且单行_不替换固定延期提示() {
+        let examples = ExampleChoices::default();
         let fallback = GreetingView {
             text: "上午好".into(),
             nudge: Some("延期提示".into()),
@@ -353,22 +478,47 @@ mod tests {
             project_empty: "没有项目".into(),
         };
         let valid = r#"{"greeting":"上午好，慢慢来","taskPlaceholder":"比如：明天交周报","projectPlaceholder":"比如：新建读书项目","taskEmpty":"今天还没有任务","projectEmpty":"说一句开始一个项目"}"#;
-        let view = parse_copy(valid, &fallback).unwrap();
+        let view = parse_copy(valid, &fallback, &examples).unwrap();
         assert!(view.generated);
         assert_eq!(view.nudge, fallback.nudge);
-        assert!(parse_copy("普通问候文字", &fallback).is_none());
+        assert_eq!(view.task_placeholder, TASK_EXAMPLES[0]);
+        assert_eq!(view.project_placeholder, PROJECT_EXAMPLES[0]);
+        let unsupported = valid.replace("比如：明天交周报", "例如：撰写周报初稿，预计耗时一小时");
+        assert_eq!(
+            parse_copy(&unsupported, &fallback, &examples)
+                .unwrap()
+                .task_placeholder,
+            TASK_EXAMPLES[0]
+        );
+        let supported = valid.replace("比如：明天交周报", TASK_EXAMPLES[2]);
+        assert_eq!(
+            parse_copy(&supported, &fallback, &examples)
+                .unwrap()
+                .task_placeholder,
+            TASK_EXAMPLES[2]
+        );
+        assert!(parse_copy("普通问候文字", &fallback, &examples).is_none());
         assert!(
             parse_copy(
                 &valid.replace("今天还没有任务", "第一行\\n第二行"),
-                &fallback
+                &fallback,
+                &examples
             )
             .is_none()
         );
-        assert!(parse_copy(&valid.replace("说一句开始一个项目", ""), &fallback).is_none());
+        assert!(
+            parse_copy(
+                &valid.replace("说一句开始一个项目", ""),
+                &fallback,
+                &examples
+            )
+            .is_none()
+        );
         assert!(
             parse_copy(
                 &valid.replace("上午好，慢慢来", "别忘了机械光瓦项目阶段性完成的里程碑"),
-                &fallback
+                &fallback,
+                &examples
             )
             .is_none()
         );

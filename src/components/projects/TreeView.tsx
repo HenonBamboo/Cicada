@@ -18,7 +18,7 @@ function Box({ data }: NodeProps<BoxNode>) {
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <span
         className={`tbox${root ? " root" : ""}${n.done && !root ? " done" : ""}${flash ? " flash" : ""}`}
-        title={itemDescription(n)}
+        data-item-details={itemDescription(n)}
       >
         {n.done && !root && <Icon name="check" />}
         <MarkdownInline text={n.title} />

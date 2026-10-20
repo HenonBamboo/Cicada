@@ -23,7 +23,7 @@ function Row({
     <div>
       <div
         className={`prow l${n.depth}${n.done ? " done" : ""}${isFlash(n.id) ? " flash" : ""}`}
-        title={itemDescription(n)}
+        data-item-details={itemDescription(n)}
       >
         {hasKids ? (
           <button
@@ -52,7 +52,7 @@ function Row({
         )}
       </div>
       {(n.note || n.dueAt) && (
-        <div className={`project-detail l${n.depth}`} title={itemDescription(n)}>
+        <div className={`project-detail l${n.depth}`} data-item-details={itemDescription(n)}>
           {n.dueAt && (
             <span className="chip amber">
               <Icon name="flag" />

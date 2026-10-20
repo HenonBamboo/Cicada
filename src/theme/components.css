@@ -204,6 +204,27 @@ button {
   border-radius: var(--r-md);
   box-shadow: var(--pop-shadow);
 }
+.item-details {
+  position: fixed;
+  z-index: 100;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  padding: 10px 12px;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.item-details strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text);
+  font-weight: 500;
+}
 
 /* 键盘焦点可见 */
 :focus-visible {

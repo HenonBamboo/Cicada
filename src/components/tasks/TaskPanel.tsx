@@ -113,7 +113,7 @@ function TaskRow({
       ref={ref}
       {...rowMotion}
       className={`task${shown ? " is-done" : ""}${flash ? " flash" : ""}`}
-      title={itemDescription(t)}
+      data-item-details={itemDescription(t)}
     >
       <Check
         on={shown}
@@ -146,7 +146,7 @@ function UpcomingRow({ t, today, flash }: { t: TaskView; today: string; flash: b
       ref={ref}
       {...rowMotion}
       className={`task upcoming${flash ? " flash" : ""}`}
-      title={itemDescription(t)}
+      data-item-details={itemDescription(t)}
     >
       <span className="dot">
         <Icon name="clock" />

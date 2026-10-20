@@ -4,6 +4,7 @@ import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import "../../styles.css";
 import { desktopWindowLabel } from "../../lib/desktop";
+import { ItemDetails } from "../../components/ItemDetails";
 
 const MainWindow = lazy(() =>
   import("./MainWindow").then((module) => ({ default: module.MainWindow })),
@@ -24,5 +25,6 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <Suspense fallback={null}>
       {kind === "quick" ? <QuickCapture /> : kind === "sticky" ? <StickyWindow /> : <MainWindow />}
     </Suspense>
+    {kind !== "quick" && <ItemDetails />}
   </React.StrictMode>,
 );
