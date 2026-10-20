@@ -6,11 +6,16 @@ export function nodeDeadline(at: string): string {
   return `${monthDay(at)}${at.length > 10 ? ` ${timeOf(at)}` : ""}`;
 }
 
-export function nodeDescription(node: ProjectNode): string {
+/** 名称与记录信息只用于原生悬停提示，不增加列表内容。 */
+export function itemDescription(
+  item: Pick<ProjectNode, "title" | "note" | "dueAt" | "createdAt" | "doneAt" | "done">,
+): string {
   return [
-    markdownToPlainText(node.title),
-    node.note && markdownToPlainText(node.note),
-    node.dueAt && `截止 ${node.dueAt.replace("T", " ")}`,
+    markdownToPlainText(item.title),
+    `录入时间：${item.createdAt.replace("T", " ")}`,
+    `完成时间：${!item.done ? "未完成" : item.doneAt?.replace("T", " ") || "未记录"}`,
+    item.note && `备注：${markdownToPlainText(item.note)}`,
+    item.dueAt && `截止时间：${item.dueAt.replace("T", " ")}`,
   ]
     .filter(Boolean)
     .join("\n");

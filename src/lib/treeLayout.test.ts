@@ -7,6 +7,8 @@ const n = (id: number, depth: number, children: ProjectNode[] = []): ProjectNode
   title: `节点${id}`,
   depth,
   done: false,
+  createdAt: "2026-10-20T09:00:00",
+  doneAt: null,
   note: null,
   dueAt: null,
   projectStatus: depth === 1 ? "active" : null,

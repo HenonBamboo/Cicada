@@ -81,6 +81,24 @@ fn parse_copy(text: &str, fallback: &GreetingView) -> Option<GreetingView> {
     }) {
         return None;
     }
+    // 问候只作状态回顾；催办使用基于当前未完成任务生成的固定副标题。
+    // 不让模型将已完成的里程碑误写成“别忘了/记得完成”的提醒。
+    if [
+        "别忘",
+        "不要忘",
+        "记得",
+        "记着",
+        "记住要",
+        "别漏",
+        "不要漏",
+        "抓紧",
+        "赶紧",
+    ]
+    .iter()
+    .any(|phrase| copy.greeting.contains(phrase))
+    {
+        return None;
+    }
     Some(GreetingView {
         text: copy.greeting.trim().into(),
         nudge: fallback.nudge.clone(),
@@ -203,12 +221,12 @@ fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult
     let projects = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"milestones":milestones,"milestonePolicy":"里程碑只使用项目名称和 progress 表达，不引用具体子任务。项目未勾选完成时只能称为阶段性完成，即使全部子节点已经完成。","activeProjects":projects,"longDelayedTask":stale.map(|task|json!({"title":task.title,"days":task.delay_days}))}).to_string();
+    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"completedMilestones":milestones,"milestonePolicy":"completedMilestones 是已发生的完成进展，只可回顾肯定，不是待办，不可提醒再做。里程碑只使用项目名称和 progress 表达，不引用具体子任务。项目未勾选完成时只能称为阶段性完成，即使全部子节点已经完成。greeting 不使用别忘了、记得、抓紧等催办表达，未完成任务的提醒另有确定性副标题。","activeProjects":projects,"longDelayedTask":stale.map(|task|json!({"title":task.title,"days":task.delay_days}))}).to_string();
     let mut digest = Sha256::new();
     digest.update(input.as_bytes());
     digest.update(crate::prompts::load(&state.paths.prompts(), PromptId::Greeting).as_bytes());
     digest.update(serde_json::to_vec(&config.model.chat)?);
-    let fingerprint = format!("ui-v1:{:x}", digest.finalize());
+    let fingerprint = format!("ui-v2:{:x}", digest.finalize());
     Ok(Context {
         date: today.to_string(),
         slot: time_slot,
@@ -347,5 +365,12 @@ mod tests {
             .is_none()
         );
         assert!(parse_copy(&valid.replace("说一句开始一个项目", ""), &fallback).is_none());
+        assert!(
+            parse_copy(
+                &valid.replace("上午好，慢慢来", "别忘了机械光瓦项目阶段性完成的里程碑"),
+                &fallback
+            )
+            .is_none()
+        );
     }
 }

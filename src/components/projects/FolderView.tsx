@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { ProjectNode } from "../../lib/types";
 import { MarkdownBlock, MarkdownInline, markdownToPlainText } from "../../lib/markdown";
-import { nodeDeadline } from "../../lib/nodePresentation";
+import { itemDescription, nodeDeadline } from "../../lib/nodePresentation";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 
@@ -21,7 +21,10 @@ function Row({
   const pr = n.progress;
   return (
     <div>
-      <div className={`prow l${n.depth}${n.done ? " done" : ""}${isFlash(n.id) ? " flash" : ""}`}>
+      <div
+        className={`prow l${n.depth}${n.done ? " done" : ""}${isFlash(n.id) ? " flash" : ""}`}
+        title={itemDescription(n)}
+      >
         {hasKids ? (
           <button
             type="button"
@@ -36,7 +39,7 @@ function Row({
           <span className="spacer" />
         )}
         <Check on={n.done} readonly />
-        <span className="t" title={markdownToPlainText(n.title)}>
+        <span className="t">
           <MarkdownInline text={n.title} />
         </span>
         {pr && (
@@ -49,9 +52,9 @@ function Row({
         )}
       </div>
       {(n.note || n.dueAt) && (
-        <div className={`project-detail l${n.depth}`}>
+        <div className={`project-detail l${n.depth}`} title={itemDescription(n)}>
           {n.dueAt && (
-            <span className="chip amber" title={n.dueAt.replace("T", " ")}>
+            <span className="chip amber">
               <Icon name="flag" />
               截止 {nodeDeadline(n.dueAt)}
             </span>

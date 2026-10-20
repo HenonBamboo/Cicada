@@ -22,7 +22,7 @@ import type { ProjectNode, TaskView } from "../../lib/types";
 import { useCapture } from "../../lib/useCapture";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
 import { useUiCopy } from "../../lib/useUiCopy";
-import { nodeDeadline, nodeDescription } from "../../lib/nodePresentation";
+import { nodeDeadline, itemDescription } from "../../lib/nodePresentation";
 import "./sticky.css";
 
 const COLORS: [StickyColor, string][] = [
@@ -37,7 +37,7 @@ function ProjectTree({ node }: { node: ProjectNode }) {
     <>
       <div
         className={`st-node l${node.depth}${node.done ? " done" : ""}`}
-        title={nodeDescription(node)}
+        title={itemDescription(node)}
       >
         <span className="dot" />
         <span className="t">
@@ -66,7 +66,10 @@ function Task({
   flash: boolean;
 }) {
   return (
-    <div className={`st-task${task.done ? " is-done" : ""}${flash ? " flash" : ""}`}>
+    <div
+      className={`st-task${task.done ? " is-done" : ""}${flash ? " flash" : ""}`}
+      title={itemDescription(task)}
+    >
       <Check
         on={task.done}
         label={`${task.done ? "取消完成" : "完成"}「${markdownToPlainText(task.title)}」`}
@@ -197,7 +200,12 @@ export function StickyWindow() {
           if (!(event.target as HTMLElement).closest("button")) void act(openMain);
         }}
       >
-        <span className="st-title">
+        <span
+          className="st-title"
+          title={
+            state?.kind === "project" && board?.project ? itemDescription(board.project) : undefined
+          }
+        >
           {state?.kind === "project" ? (
             <>
               项目 · <MarkdownInline text={board?.project?.title ?? "项目"} />

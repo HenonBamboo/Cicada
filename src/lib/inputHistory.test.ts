@@ -17,6 +17,7 @@ describe("输入历史", () => {
     expect(historyDirection(key("ArrowUp"), text, 0, 0, true)).toBe(1);
     expect(historyDirection(key("ArrowUp"), text, 4, 4, true)).toBeNull();
     expect(historyDirection(key("ArrowDown"), text, text.length, text.length, true)).toBe(-1);
+    expect(historyDirection(key("ArrowUp"), "单行草稿", 4, 4, true)).toBe(1);
     expect(historyDirection(key("ArrowUp", { isComposing: true }), text, 0, 0, false)).toBeNull();
     expect(historyDirection(key("ArrowUp", { shiftKey: true }), text, 0, 0, false)).toBeNull();
     expect(historyDirection(key("ArrowUp"), text, 0, 2, false)).toBeNull();

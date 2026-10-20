@@ -5,6 +5,7 @@ import type { TaskBoard, TaskView } from "../../lib/types";
 import { taskKey } from "../../lib/useBoard";
 import { MarkdownBlock, MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import { useUiCopy } from "../../lib/useUiCopy";
+import { itemDescription } from "../../lib/nodePresentation";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 
@@ -112,6 +113,7 @@ function TaskRow({
       ref={ref}
       {...rowMotion}
       className={`task${shown ? " is-done" : ""}${flash ? " flash" : ""}`}
+      title={itemDescription(t)}
     >
       <Check
         on={shown}
@@ -140,7 +142,12 @@ function TaskRow({
 function UpcomingRow({ t, today, flash }: { t: TaskView; today: string; flash: boolean }) {
   const ref = useRevealOnFlash(flash);
   return (
-    <motion.div ref={ref} {...rowMotion} className={`task upcoming${flash ? " flash" : ""}`}>
+    <motion.div
+      ref={ref}
+      {...rowMotion}
+      className={`task upcoming${flash ? " flash" : ""}`}
+      title={itemDescription(t)}
+    >
       <span className="dot">
         <Icon name="clock" />
       </span>

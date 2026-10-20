@@ -9,7 +9,7 @@ use super::{ChangeSet, DATE_FMT, Service, TaskBoard, TaskLink, TaskView};
 use crate::error::{AppError, AppResult};
 
 const TASK_COLUMNS: &str = "t.id, t.title, t.planned_date, t.status, t.due_at, t.remind_at, t.note, \
-     t.node_id, t.version, r.kind, r.params";
+     t.node_id, t.version, r.kind, r.params, t.created_at, t.done_at";
 
 struct RawTask {
     view: TaskView,
@@ -30,6 +30,8 @@ fn read_task(r: &Row<'_>) -> rusqlite::Result<RawTask> {
             due_at: r.get(4)?,
             remind_at: r.get(5)?,
             note: r.get(6)?,
+            created_at: r.get(11)?,
+            done_at: r.get(12)?,
             recur: None,
             link: None,
             version: r.get(8)?,
@@ -222,6 +224,9 @@ mod tests {
         assert_eq!(titles(&b.legacy), ["三天前"]);
         assert_eq!(b.legacy[0].delay_days, 3);
         assert_eq!(titles(&b.done), ["做完了"]);
+        assert_eq!(b.today[0].created_at, NOW);
+        assert_eq!(b.today[0].done_at, None);
+        assert_eq!(b.done[0].done_at.as_deref(), Some("2026-10-17T10:00:00"));
         assert_eq!(titles(&b.upcoming), ["明天"]);
     }
 

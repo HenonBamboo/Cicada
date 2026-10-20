@@ -52,6 +52,8 @@ export interface TaskView {
   title: string;
   plannedDate: string;
   done: boolean;
+  createdAt: string;
+  doneAt: string | null;
   delayDays: number;
   dueAt: string | null;
   remindAt: string | null;
@@ -78,6 +80,8 @@ export interface ProjectNode {
   title: string;
   depth: number;
   done: boolean;
+  createdAt: string;
+  doneAt: string | null;
   note: string | null;
   dueAt: string | null;
   projectStatus: "active" | "done" | "archived" | null;

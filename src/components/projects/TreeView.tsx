@@ -4,7 +4,7 @@ import "@xyflow/react/dist/style.css";
 import { layoutTree } from "../../lib/treeLayout";
 import type { ProjectNode } from "../../lib/types";
 import { MarkdownInline } from "../../lib/markdown";
-import { nodeDeadline, nodeDescription } from "../../lib/nodePresentation";
+import { nodeDeadline, itemDescription } from "../../lib/nodePresentation";
 import { Icon } from "../Icon";
 
 type BoxData = { node: ProjectNode; root: boolean; flash: boolean };
@@ -18,7 +18,7 @@ function Box({ data }: NodeProps<BoxNode>) {
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <span
         className={`tbox${root ? " root" : ""}${n.done && !root ? " done" : ""}${flash ? " flash" : ""}`}
-        title={nodeDescription(n)}
+        title={itemDescription(n)}
       >
         {n.done && !root && <Icon name="check" />}
         <MarkdownInline text={n.title} />

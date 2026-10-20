@@ -19,7 +19,7 @@ export function historyDirection(
     return null;
   if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return null;
   if (selectionStart !== selectionEnd) return null;
-  if (multiline) {
+  if (multiline && text.includes("\n")) {
     if (event.key === "ArrowUp" && selectionStart !== 0) return null;
     if (event.key === "ArrowDown" && selectionEnd !== text.length) return null;
   }

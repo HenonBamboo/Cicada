@@ -22,6 +22,8 @@ pub struct TaskView {
     pub due_at: Option<String>,
     pub remind_at: Option<String>,
     pub note: Option<String>,
+    pub created_at: String,
+    pub done_at: Option<String>,
     /// 重复规则的简短说明，如「每天」
     pub recur: Option<String>,
     pub link: Option<TaskLink>,
@@ -54,6 +56,8 @@ pub struct ProjectNode {
     pub done: bool,
     pub note: Option<String>,
     pub due_at: Option<String>,
+    pub created_at: String,
+    pub done_at: Option<String>,
     /// 只有项目（第 1 层）有：active / done / archived
     pub project_status: Option<String>,
     /// 直接子节点的完成进度；没有子节点时为空
