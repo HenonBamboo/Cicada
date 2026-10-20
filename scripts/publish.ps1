@@ -92,8 +92,14 @@ foreach ($remote in @('origin', 'gitcode')) {
     if ($mainRef.Count -ne 1 -or $tagRef.Count -ne 1 -or ($mainRef[0] -split '\s+')[0] -cne $head -or ($tagRef[0] -split '\s+')[0] -cne $head) { throw "Remote main/tag commit verification failed: $remote" }
 }
 
-$githubJson = & gh release view $tag --repo HenonBamboo/Cicada --json assets 2>$null
-if ($LASTEXITCODE -ne 0) {
+$nativePreference = $ErrorActionPreference
+try {
+    # Windows PowerShell 5.1 将预期的“release not found” stderr 也视作错误记录。
+    $ErrorActionPreference = 'Continue'
+    $githubJson = & gh release view $tag --repo HenonBamboo/Cicada --json assets 2>$null
+    $githubStatus = $LASTEXITCODE
+} finally { $ErrorActionPreference = $nativePreference }
+if ($githubStatus -ne 0) {
     & gh release create $tag --repo HenonBamboo/Cicada --verify-tag --title $releaseName --notes-file $NotesFile
     if ($LASTEXITCODE -ne 0) { throw 'GitHub release creation failed.' }
 } else {
@@ -110,7 +116,8 @@ if ($null -eq $release) {
 }
 function Assert-GitCodeAssets([object]$Release, [bool]$RequireAll) {
     $sourcePattern = '^Cicada-v?' + [regex]::Escape($version) + '\.(zip|tar|tar\.gz|tar\.bz2)$'
-    $names = @($Release.assets | Where-Object { $_.name -notmatch $sourcePattern } | ForEach-Object name)
+    $tagSourcePattern = '^' + [regex]::Escape($tag) + '\.(zip|tar|tar\.gz|tar\.bz2)$'
+    $names = @($Release.assets | Where-Object { -not ($_.type -ceq 'source' -and ($_.name -match $sourcePattern -or $_.name -match $tagSourcePattern)) } | ForEach-Object name)
     if (@($names | Where-Object { $assets -cnotcontains $_ }).Count -gt 0) { throw 'GitCode release contains unrelated assets; no files were replaced.' }
     if ($RequireAll -and (Compare-Object ($assets | Sort-Object) ($names | Sort-Object))) { throw 'GitCode release does not contain exactly the five expected attachments.' }
 }
