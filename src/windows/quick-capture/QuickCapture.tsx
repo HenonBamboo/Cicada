@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { hideQuick, onDesktopFocus, onQuickOpened } from "../../lib/desktop";
 import { useCapture } from "../../lib/useCapture";
+import { useUiCopy } from "../../lib/useUiCopy";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
 import { isModeShortcut } from "../../lib/keys";
 import "./quick.css";
@@ -8,7 +9,8 @@ import "./quick.css";
 export function QuickCapture() {
   const input = useRef<HTMLInputElement>(null);
   const appearanceError = useDesktopAppearance();
-  const capture = useCapture();
+  const capture = useCapture("quick");
+  const copy = useUiCopy();
   const setCaptureError = capture.setError;
   useEffect(() => {
     const focus = () => input.current?.focus();
@@ -38,14 +40,12 @@ export function QuickCapture() {
           value={capture.text}
           disabled={capture.busy}
           autoComplete="off"
-          placeholder={
-            capture.mode === "task"
-              ? "说一句，比如：周五前交报告，下午三点提醒我"
-              : "比如：给「知了」项目加一项：整理发布说明"
-          }
+          maxLength={20_000}
+          placeholder={capture.mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
           onChange={(event) => capture.setText(event.target.value)}
           onPaste={capture.paste}
           onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing || capture.historyKeyDown(event)) return;
             if (isModeShortcut(event)) {
               event.preventDefault();
               capture.setMode(capture.mode === "task" ? "project" : "task");

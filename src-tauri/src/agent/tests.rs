@@ -73,6 +73,46 @@ fn scripted(steps: Vec<Step>) -> Model {
     Model::Scripted(ScriptedModel::new(steps))
 }
 
+/// 旧业务场景补齐新协议；新的漏项/编号回归使用 scripted 显式构造错误。
+fn scripted_write(text: &str, mut steps: Vec<Step>) -> Model {
+    let mut declared = false;
+    for step in &mut steps {
+        if let Step::Tools(calls) = step {
+            if !declared {
+                let mut before = vec![(
+                    "intent_checklist",
+                    json!({"items":[{"id":"i1","excerpt":text,"kind":"write"}]}),
+                )];
+                if calls.iter().any(|(name, _)| {
+                    matches!(*name, "task_update" | "task_delete" | "task_set_done")
+                }) {
+                    before.push(("task_query", json!({})));
+                }
+                if calls.iter().any(|(name, args)| {
+                    (*name == "node_add"
+                        || name.starts_with("node_")
+                        || *name == "project_set_status")
+                        && ["id", "parent_id"].iter().any(|key| {
+                            args.get(*key)
+                                .is_some_and(|v| !v.as_str().is_some_and(|s| s.starts_with('$')))
+                        })
+                }) {
+                    before.push(("project_query", json!({})));
+                }
+                before.append(calls);
+                *calls = before;
+                declared = true;
+            }
+            for (name, args) in calls {
+                if intent::is_write(name) {
+                    args["intent_id"] = json!("i1");
+                }
+            }
+        }
+    }
+    scripted(steps)
+}
+
 fn seen(m: &Model) -> Vec<(String, Vec<Message>)> {
     match m {
         Model::Scripted(s) => s.seen.lock().unwrap().clone(),
@@ -81,21 +121,103 @@ fn seen(m: &Model) -> Vec<(String, Vec<Message>)> {
 }
 
 #[tokio::test]
+async fn 多条要求未处理完不提交_追问补齐后一起写入() {
+    let env = Env::new();
+    let c = clock("2026-10-20 10:00:00");
+    let m = scripted(vec![
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"a","excerpt":"买菜","kind":"write"},{"id":"b","excerpt":"交周报","kind":"write"}]}),
+            ),
+            ("task_add", json!({"title":"买菜","intent_id":"a"})),
+        ]),
+        Step::Say("已添加全部内容（编号123）"),
+        Step::Tools(vec![(
+            "ask_clarify",
+            json!({"question":"交周报也安排今天吗？"}),
+        )]),
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"a","excerpt":"买菜","kind":"write"},{"id":"b","excerpt":"交周报","kind":"write"},{"id":"answer","excerpt":"也安排今天","kind":"context"}]}),
+            ),
+            (
+                "task_add",
+                json!({"title":"交周报","note":"- 数据\n- **说明**","intent_id":"b"}),
+            ),
+        ]),
+        Step::Say("全部办好，编号123"),
+    ]);
+    let ctx = env.ctx(&c, Some(&m));
+    let first = submit(&ctx, input("- 买菜\n- 交周报")).await.unwrap();
+    assert_eq!(first.kind, ReplyKind::Clarify);
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+    let done = submit(&ctx, input("也安排今天")).await.unwrap();
+    assert_eq!(done.kind, ReplyKind::Done);
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 2);
+    assert!(!done.lead.contains("123"));
+    let saved = ctx.svc(|s| s.inbox_get(&done.request_id)).unwrap();
+    let summary = saved.result_summary.unwrap();
+    assert!(summary.contains("买菜") && summary.contains("交周报"));
+    assert_eq!(
+        env.db
+            .lock()
+            .unwrap()
+            .query_row("SELECT note FROM tasks WHERE title='交周报'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+        "- 数据\n- **说明**"
+    );
+}
+
+#[tokio::test]
+async fn 后续项目输入共享快速记录上下文且本轮原文不截断() {
+    let env = Env::new();
+    let c = clock("2026-10-20 10:00:00");
+    let m = scripted(vec![Step::Say("请补充要放入的项目名称。")]);
+    let ctx = env.ctx(&c, Some(&m));
+    ctx.svc(|s| {
+        s.inbox_register("previous", "quick", "task", "联系崔所长进行调度对接", &[])?;
+        s.inbox_set(
+            "previous",
+            Status::Done,
+            None,
+            None,
+            Some("添加「联系崔所长进行调度对接」"),
+        )
+    })
+    .unwrap();
+    let text = format!("把刚才那件放入项目，备注：\n{}", "**原文**\n".repeat(1500));
+    let mut request = input(&text);
+    request.mode = Mode::Project;
+    submit(&ctx, request).await.unwrap();
+    let observed = seen(&m);
+    assert!(observed[0].0.contains("联系崔所长进行调度对接"));
+    assert!(observed[0].0.contains("仅供理解本轮的指代关系"));
+    assert!(matches!(&observed[0].1[0], Message::User {text: actual} if actual == &text));
+}
+
+#[tokio::test]
 async fn 添加任务_写入并可追溯到请求() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![(
-            "task_add",
-            json!({"title": "交周报", "planned_date": "2026-10-18", "remind_at": "15:00"}),
-        )]),
-        Step::Say("知了，已添加 1 件事。"),
-    ]);
+    let m = scripted_write(
+        "明天下午三点提醒我交周报",
+        vec![
+            Step::Tools(vec![(
+                "task_add",
+                json!({"title": "交周报", "planned_date": "2026-10-18", "remind_at": "15:00"}),
+            )]),
+            Step::Say("知了，已添加 1 件事。"),
+        ],
+    );
     let r = submit(&env.ctx(&c, Some(&m)), input("明天下午三点提醒我交周报"))
         .await
         .unwrap();
     assert_eq!(r.kind, ReplyKind::Done);
-    assert_eq!(r.lead, "知了，已添加 1 件事。");
+    assert_eq!(r.lead, "知了，已完成以下操作。");
     assert_eq!(r.items[0].text, "添加「交周报」（明天，15:00 提醒）");
     assert_eq!(
         env.count("SELECT COUNT(*) FROM tasks WHERE remind_at = '2026-10-18T15:00:00'"),
@@ -127,10 +249,13 @@ async fn 删除先确认_回复确认后执行() {
     let env = Env::new();
     let id = env.add_task("开会");
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![("task_delete", json!({"id": id.to_string()}))]),
-        Step::Say("知了，已删除。"),
-    ]);
+    let m = scripted_write(
+        "删掉开会",
+        vec![
+            Step::Tools(vec![("task_delete", json!({"id": id.to_string()}))]),
+            Step::Say("知了，已删除。"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     let r = submit(&ctx, input("删掉开会")).await.unwrap();
     assert_eq!(r.kind, ReplyKind::Confirm);
@@ -139,7 +264,7 @@ async fn 删除先确认_回复确认后执行() {
 
     let r = submit(&ctx, input("确认")).await.unwrap();
     assert_eq!(r.kind, ReplyKind::Done);
-    assert_eq!(r.lead, "知了，已删除。");
+    assert_eq!(r.lead, "知了，已完成以下操作。");
     assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
     assert_eq!(seen(&m).len(), 2, "确认不再经过模型");
 }
@@ -149,10 +274,13 @@ async fn 确认前有变化时重新预览() {
     let env = Env::new();
     let id = env.add_task("开会");
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![("task_delete", json!({"id": id}))]),
-        Step::Say("好"),
-    ]);
+    let m = scripted_write(
+        "删掉开会",
+        vec![
+            Step::Tools(vec![("task_delete", json!({"id": id}))]),
+            Step::Say("好"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     let r = submit(&ctx, input("删掉开会")).await.unwrap();
     // 确认前用户手动勾选了它
@@ -174,11 +302,14 @@ async fn 说取消或别的话都不执行() {
     let env = Env::new();
     let id = env.add_task("开会");
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![("task_delete", json!({"id": id}))]),
-        Step::Say("好"),
-        Step::Say("今天还有 1 件事。"),
-    ]);
+    let m = scripted_write(
+        "删掉开会",
+        vec![
+            Step::Tools(vec![("task_delete", json!({"id": id}))]),
+            Step::Say("好"),
+            Step::Say("今天还有 1 件事。"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     submit(&ctx, input("删掉开会")).await.unwrap();
     let r = submit(&ctx, input("算了")).await.unwrap();
@@ -194,17 +325,26 @@ async fn 说取消或别的话都不执行() {
 async fn 快速记录入队后在主窗口续答且不重复写入() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![(
-            "ask_clarify",
-            json!({"question":"要记录哪件事？", "options":["交周报"]}),
-        )]),
-        Step::Tools(vec![(
-            "task_add",
-            json!({"title":"交周报", "planned_date":"2026-10-17"}),
-        )]),
-        Step::Say("知了，已添加。"),
-    ]);
+    let m = scripted_write(
+        "记录一下",
+        vec![
+            Step::Tools(vec![(
+                "ask_clarify",
+                json!({"question":"要记录哪件事？", "options":["交周报"]}),
+            )]),
+            Step::Tools(vec![
+                (
+                    "intent_checklist",
+                    json!({"items":[{"id":"i1","excerpt":"记录一下","kind":"write"},{"id":"answer","excerpt":"交周报","kind":"context"}]}),
+                ),
+                (
+                    "task_add",
+                    json!({"title":"交周报", "planned_date":"2026-10-17"}),
+                ),
+            ]),
+            Step::Say("知了，已添加。"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     let id = uuid::Uuid::new_v4().to_string();
     ctx.svc(|s| s.inbox_register(&id, "quick", "task", "记录一下", &[]))
@@ -230,15 +370,25 @@ async fn 追问后接着处理() {
     let a = env.add_task("周会");
     env.add_task("产品评审会");
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![("task_query", json!({"keyword": "会"}))]),
-        Step::Tools(vec![(
-            "ask_clarify",
-            json!({"question": "是哪一个会？", "options": ["周会", "产品评审会"]}),
-        )]),
-        Step::Tools(vec![("task_set_done", json!({"id": a, "done": true}))]),
-        Step::Say("知了，「周会」已完成。"),
-    ]);
+    let m = scripted_write(
+        "开会那件做完了",
+        vec![
+            Step::Tools(vec![("task_query", json!({"keyword": "会"}))]),
+            Step::Tools(vec![(
+                "ask_clarify",
+                json!({"question": "是哪一个会？", "options": ["周会", "产品评审会"]}),
+            )]),
+            Step::Tools(vec![
+                (
+                    "intent_checklist",
+                    json!({"items":[{"id":"i1","excerpt":"开会那件做完了","kind":"write"},{"id":"answer","excerpt":"周会","kind":"context"}]}),
+                ),
+                ("task_query", json!({"keyword":"周会"})),
+                ("task_set_done", json!({"id": a, "done": true})),
+            ]),
+            Step::Say("知了，「周会」已完成。"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     let r = submit(&ctx, input("开会那件做完了")).await.unwrap();
     assert_eq!(r.kind, ReplyKind::Clarify);
@@ -269,7 +419,7 @@ async fn 模型用错编号时告诉它_不写数据() {
     let r = submit(&env.ctx(&c, Some(&m)), input("删掉不存在的事"))
         .await
         .unwrap();
-    assert_eq!(r.kind, ReplyKind::Info);
+    assert_eq!(r.kind, ReplyKind::Error);
     let calls = seen(&m);
     assert!(matches!(
         calls[1].1.last(),
@@ -279,14 +429,51 @@ async fn 模型用错编号时告诉它_不写数据() {
 }
 
 #[tokio::test]
+async fn 追问期间同编号被复用时拒绝旧计划() {
+    let env = Env::new();
+    let id = env.add_task("旧任务");
+    let c = clock("2026-10-17 10:00:00");
+    let m = scripted_write(
+        "修改旧任务",
+        vec![Step::Tools(vec![
+            ("task_update", json!({"id":id,"title":"旧任务的新标题"})),
+            (
+                "ask_clarify",
+                json!({"question":"还要补充备注吗？","options":[]}),
+            ),
+        ])],
+    );
+    let ctx = env.ctx(&c, Some(&m));
+    let pending = submit(&ctx, input("修改旧任务")).await.unwrap();
+    assert_eq!(pending.kind, ReplyKind::Clarify);
+    env.db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM tasks WHERE id=?1", [id])
+        .unwrap();
+    assert_eq!(env.add_task("另一条新任务"), id);
+    let result = submit(&ctx, input("不用补充")).await.unwrap();
+    assert_eq!(result.kind, ReplyKind::Error);
+    assert!(result.lead.contains("追问期间"));
+    assert_eq!(
+        env.count("SELECT COUNT(*) FROM tasks WHERE title='另一条新任务'"),
+        1
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM op_log"), 0);
+}
+
+#[tokio::test]
 async fn 断网时暂存_恢复后处理且不重复() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Fail(LlmError::Network("连接超时".into())),
-        Step::Tools(vec![("task_add", json!({"title": "看展"}))]),
-        Step::Say("知了，记下了。"),
-    ]);
+    let m = scripted_write(
+        "周末去看展",
+        vec![
+            Step::Fail(LlmError::Network("连接超时".into())),
+            Step::Tools(vec![("task_add", json!({"title": "看展"}))]),
+            Step::Say("知了，记下了。"),
+        ],
+    );
     let ctx = env.ctx(&c, Some(&m));
     let r = submit(&ctx, input("周末去看展")).await.unwrap();
     assert_eq!(r.kind, ReplyKind::Offline);
@@ -363,9 +550,22 @@ async fn 对话撤销与重复的撤销() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
     let m = scripted(vec![
-        Step::Tools(vec![("task_add", json!({"title": "买菜"}))]),
+        Step::Tools(vec![(
+            "intent_checklist",
+            json!({"items":[{"id":"add","excerpt":"添加买菜","kind":"write"}]}),
+        )]),
+        Step::Tools(vec![(
+            "task_add",
+            json!({"title": "买菜","intent_id":"add"}),
+        )]),
         Step::Say("知了，已添加。"),
-        Step::Tools(vec![("undo_last", json!({}))]),
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"undo","excerpt":"撤销刚才的操作","kind":"write"}]}),
+            ),
+            ("undo_last", json!({"intent_id":"undo"})),
+        ]),
         Step::Say("知了，已撤销。"),
     ]);
     let ctx = env.ctx(&c, Some(&m));
@@ -380,16 +580,19 @@ async fn 对话撤销与重复的撤销() {
 async fn 项目模式三层创建安排完成并提示父节点() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
-    let m = scripted(vec![
-        Step::Tools(vec![
-            ("project_add", json!({"title":"知了开发"})),
-            ("node_add", json!({"parent_id":"$1","title":"项目功能"})),
-            ("node_add", json!({"parent_id":"$2","title":"接通工具"})),
-            ("node_schedule_today", json!({"id":"$3"})),
-            ("node_set_done", json!({"id":"$3","done":true})),
-        ]),
-        Step::Say("知了，已完成接通工具。"),
-    ]);
+    let m = scripted_write(
+        "新建知了开发项目，在项目功能下添加接通工具，安排今天并标记完成",
+        vec![
+            Step::Tools(vec![
+                ("project_add", json!({"title":"知了开发"})),
+                ("node_add", json!({"parent_id":"$1","title":"项目功能"})),
+                ("node_add", json!({"parent_id":"$2","title":"接通工具"})),
+                ("node_schedule_today", json!({"id":"$3"})),
+                ("node_set_done", json!({"id":"$3","done":true})),
+            ]),
+            Step::Say("知了，已完成接通工具。"),
+        ],
+    );
     let mut request = input("新建知了开发项目，在项目功能下添加接通工具，安排今天并标记完成");
     request.mode = Mode::Project;
     let reply = submit(&env.ctx(&c, Some(&m)), request).await.unwrap();

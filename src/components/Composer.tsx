@@ -7,13 +7,10 @@ import {
   type KeyboardEvent,
 } from "react";
 import { isModeShortcut } from "../lib/keys";
+import { useInputHistory } from "../lib/useInputHistory";
+import { useUiCopy } from "../lib/useUiCopy";
 import type { Mode } from "../lib/types";
 import { Icon } from "./Icon";
-
-const PLACEHOLDER: Record<Mode, string> = {
-  task: "说点什么，比如：明天下午三点提醒我交周报",
-  project: "比如：给「知了」加一个阶段：打包发布",
-};
 
 const MAX_HEIGHT = 150;
 const MAX_TEXT_LENGTH = 20_000;
@@ -48,6 +45,8 @@ export function Composer({
   const [inputError, setInputError] = useState("");
   const input = useRef<HTMLTextAreaElement>(null);
   const file = useRef<HTMLInputElement>(null);
+  const history = useInputHistory(mode, "main");
+  const copy = useUiCopy();
 
   useEffect(() => {
     if (focusRequest > 0) input.current?.focus();
@@ -65,7 +64,8 @@ export function Composer({
 
   const send = async () => {
     if (!canSend) return;
-    if (await onSubmit(text.trim(), images)) {
+    if (await onSubmit(text, images)) {
+      history.reset();
       setText("");
       setImages([]);
       setInputError("");
@@ -106,6 +106,8 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (history.onKeyDown(e, text, setText)) return;
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       void send();
@@ -170,9 +172,10 @@ export function Composer({
         value={text}
         maxLength={MAX_TEXT_LENGTH}
         disabled={busy}
-        placeholder={PLACEHOLDER[mode]}
+        placeholder={mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
         aria-label="输入框"
         onChange={(e) => {
+          history.reset();
           setText(e.target.value);
           if (inputError) setInputError("");
         }}

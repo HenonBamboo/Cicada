@@ -205,6 +205,9 @@ pub fn set_appearance(
 /// 前端渲染好第一帧后再显示主窗口，避免白屏闪烁
 #[tauri::command]
 pub fn window_ready(window: tauri::WebviewWindow) -> AppResult<()> {
+    if window.label() == "main" {
+        crate::updater::mark_ready();
+    }
     crate::desktop::memory::show(&window)
         .and_then(|_| window.set_focus())
         .map_err(|e| AppError::Invalid(format!("显示窗口失败：{e}")))

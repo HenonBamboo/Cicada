@@ -52,6 +52,8 @@ pub struct ProjectNode {
     pub title: String,
     pub depth: i64,
     pub done: bool,
+    pub note: Option<String>,
+    pub due_at: Option<String>,
     /// 只有项目（第 1 层）有：active / done / archived
     pub project_status: Option<String>,
     /// 直接子节点的完成进度；没有子节点时为空

@@ -140,18 +140,48 @@ pub(super) fn s(args: &Value, k: &str) -> Option<String> {
         .map(|v| v.trim().to_string())
 }
 
+/// Markdown 备注保留缩进和换行；全空白仍按清空处理。
+pub(super) fn markdown(args: &Value, key: &str) -> Option<String> {
+    args.get(key).and_then(Value::as_str).map(|text| {
+        if text.trim().is_empty() {
+            String::new()
+        } else {
+            text.to_string()
+        }
+    })
+}
+
+pub(super) fn plain_title(value: String) -> Result<String, String> {
+    if value.contains(['\n', '\r'])
+        || value.contains("**")
+        || value.contains('`')
+        || value.contains("](")
+        || value.starts_with("# ")
+        || value.starts_with("- ")
+        || value.starts_with("* ")
+    {
+        return Err("title 请使用纯文本，把 Markdown 标题/列表/加粗/链接及详细内容保留在 note，不能丢失信息".into());
+    }
+    Ok(value)
+}
+
 pub fn specs_for(mode: &str) -> Vec<ToolSpec> {
     let mut all = specs();
     if mode == "project" {
         all.retain(|t| {
             matches!(
                 t.name.as_str(),
-                "summarize" | "ask_clarify" | "undo_last" | "report_get"
+                "task_query" | "summarize" | "ask_clarify" | "undo_last" | "report_get"
             )
         });
         all.extend(super::project_tools::specs());
     } else {
         all.extend(super::recur_tools::specs());
+        all.extend(
+            super::project_tools::specs()
+                .into_iter()
+                .filter(|tool| tool.name == "project_query"),
+        );
     }
     all
 }
@@ -228,9 +258,11 @@ pub fn normalize_time(v: &str, date: &str) -> Result<String, String> {
 fn to_change(name: &str, args: &Value, today: &str) -> Result<Change, String> {
     match name {
         "task_add" => {
-            let title = s(args, "title")
-                .filter(|t| !t.is_empty())
-                .ok_or("缺少 title")?;
+            let title = plain_title(
+                s(args, "title")
+                    .filter(|t| !t.is_empty())
+                    .ok_or("缺少 title")?,
+            )?;
             let planned = s(args, "planned_date")
                 .filter(|d| !d.is_empty())
                 .unwrap_or_else(|| today.to_string());
@@ -238,7 +270,7 @@ fn to_change(name: &str, args: &Value, today: &str) -> Result<Change, String> {
             Ok(Change::TaskAdd {
                 due_at: time("due_at")?,
                 remind_at: time("remind_at")?,
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 title,
                 planned_date: planned,
             })
@@ -249,10 +281,10 @@ fn to_change(name: &str, args: &Value, today: &str) -> Result<Change, String> {
             let time = |k: &str| s(args, k).map(|v| normalize_time(&v, &base)).transpose();
             Ok(Change::TaskUpdate {
                 task: task_ref(args)?,
-                title: s(args, "title"),
+                title: s(args, "title").map(plain_title).transpose()?,
                 due_at: time("due_at")?,
                 remind_at: time("remind_at")?,
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 planned_date: planned,
             })
         }

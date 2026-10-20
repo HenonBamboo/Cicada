@@ -13,6 +13,7 @@ pub const COMMANDS: &[&str] = &[
     "confirm_pending",
     "cancel_pending",
     "list_inbox",
+    "list_input_history",
     "retry_inbox",
     "discard_inbox",
     "get_model_settings",
@@ -22,6 +23,7 @@ pub const COMMANDS: &[&str] = &[
     "save_prompt",
     "reset_prompt",
     "preview_prompt",
+    "suggest_prompt",
     "export_data",
     "import_data",
     "list_operation_log",
@@ -33,6 +35,9 @@ pub const COMMANDS: &[&str] = &[
     "create_backup",
     "restore_backup",
     "get_greeting",
+    "get_ui_copy",
+    "get_update",
+    "install_update",
     "list_reports",
     "read_report",
     "get_desktop_bootstrap",
@@ -48,6 +53,8 @@ pub const COMMANDS: &[&str] = &[
     "submit_capture",
 ];
 pub const STICKY: &[&str] = &[
+    "list_input_history",
+    "get_ui_copy",
     "get_desktop_bootstrap",
     "get_sticky_state",
     "get_sticky_board",
@@ -58,6 +65,8 @@ pub const STICKY: &[&str] = &[
     "submit_capture",
 ];
 pub const QUICK: &[&str] = &[
+    "list_input_history",
+    "get_ui_copy",
     "get_desktop_bootstrap",
     "submit_capture",
     "hide_quick_capture",

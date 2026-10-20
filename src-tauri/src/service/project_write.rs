@@ -21,6 +21,28 @@ fn resolve(node: &TaskRef, temp: &HashMap<usize, i64>) -> AppResult<i64> {
 }
 
 impl Writer<'_> {
+    fn unique_node_title(
+        &self,
+        parent: Option<i64>,
+        title: &str,
+        except: Option<i64>,
+    ) -> AppResult<()> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id,title FROM nodes WHERE parent_id IS ?1")?;
+        let target = super::project_changes::normalized_title(title);
+        for row in stmt.query_map([parent], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
+        })? {
+            let (id, existing) = row?;
+            if Some(id) != except && super::project_changes::normalized_title(&existing) == target {
+                return Err(AppError::Invalid(
+                    "同一位置已经有同名项目或节点，未重复添加".into(),
+                ));
+            }
+        }
+        Ok(())
+    }
     fn changed_node(&mut self, id: i64) {
         if !self.changes.nodes.contains(&id) {
             self.changes.nodes.push(id);
@@ -204,6 +226,7 @@ impl Writer<'_> {
                 if depth > 3 {
                     return Err(AppError::Invalid("项目最多三层".into()));
                 }
+                self.unique_node_title(parent, title, None)?;
                 self.conn.execute("INSERT INTO nodes(parent_id,depth,title,project_status,note,due_at,sort_order,created_at,updated_at) VALUES(?1,?2,?3,?4,?5,?6,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM nodes WHERE parent_id IS ?1),?7,?7)",params![parent,depth,title.trim(),parent.is_none().then_some("active"),note.as_deref().filter(|v|!v.is_empty()),due_at.as_deref().filter(|v|!v.is_empty()),self.now])?;
                 let id = self.conn.last_insert_rowid();
                 temp.insert(temp.len() + 1, id);
@@ -228,6 +251,14 @@ impl Writer<'_> {
                 let id = resolve(node, temp)?;
                 let before = oplog::row_json(self.conn, "nodes", id)?;
                 let name = self.node_name(id)?;
+                if let Some(title) = title {
+                    let parent: Option<i64> = self.conn.query_row(
+                        "SELECT parent_id FROM nodes WHERE id=?1",
+                        [id],
+                        |r| r.get(0),
+                    )?;
+                    self.unique_node_title(parent, title, Some(id))?;
+                }
                 self.conn.execute("UPDATE nodes SET title=COALESCE(?2,title),note=CASE WHEN ?3 IS NULL THEN note ELSE NULLIF(?3,'') END,due_at=CASE WHEN ?4 IS NULL THEN due_at ELSE NULLIF(?4,'') END,version=version+1,updated_at=?5 WHERE id=?1",params![id,title.as_deref().map(str::trim),note,due_at,self.now])?;
                 self.log(
                     "node.update",
@@ -249,6 +280,7 @@ impl Writer<'_> {
             ProjectChange::Move { node, parent } => {
                 let id = resolve(node, temp)?;
                 let parent = resolve(parent, temp)?;
+                self.unique_node_title(Some(parent), &self.node_name(id)?, Some(id))?;
                 let descendants = self.descendants(id)?;
                 let (old_parent, depth): (Option<i64>, i64) = self.conn.query_row(
                     "SELECT parent_id,depth FROM nodes WHERE id=?1",

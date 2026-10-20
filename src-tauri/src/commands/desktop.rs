@@ -237,14 +237,18 @@ pub fn submit_capture(
     let id = uuid::Uuid::parse_str(&request_id)
         .map_err(|_| AppError::Invalid("请求编号无效".into()))?
         .to_string();
-    let source = if window.label() == "quick" {
-        "quick"
+    let (source, target_project) = if window.label() == "quick" {
+        ("quick", None)
     } else {
-        let id = sticky_id(window.label())?;
-        if with_service(&state, |s| s.sticky_get(id))?.kind != "today" {
-            return Err(AppError::Invalid("项目便利贴只读".into()));
-        }
-        "sticky"
+        let sticky = with_service(&state, |s| s.sticky_get(sticky_id(window.label())?))?;
+        (
+            "sticky",
+            if matches!(mode, Mode::Project) {
+                sticky.node_id
+            } else {
+                None
+            },
+        )
     };
     let mode = match mode {
         Mode::Task => "task",
@@ -253,12 +257,18 @@ pub fn submit_capture(
     with_service(&state, |s| {
         if s.inbox_exists(&id)? {
             let existing = s.inbox_get(&id)?;
-            if existing.source != source || existing.content != text || existing.mode != mode {
+            if existing.source != source
+                || existing.content != text
+                || existing.mode != mode
+                || existing.target_project_id != target_project
+            {
                 return Err(AppError::Invalid("请求编号已用于其它输入".into()));
             }
         } else {
             let paths = crate::agent::save_images(&state.paths.inbox(), &id, &images)?;
-            if let Err(e) = s.inbox_register(&id, source, mode, &text, &paths) {
+            if let Err(e) =
+                s.inbox_register_with_project(&id, source, mode, &text, &paths, target_project)
+            {
                 crate::agent::drop_images(&state.paths.inbox(), &paths);
                 return Err(e);
             }

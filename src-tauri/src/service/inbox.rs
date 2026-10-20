@@ -59,6 +59,7 @@ pub struct InboxItem {
     pub attempts: i64,
     pub last_error: Option<String>,
     pub result_summary: Option<String>,
+    pub target_project_id: Option<i64>,
     #[serde(skip)]
     pub vision_text: Option<String>,
 }
@@ -79,11 +80,24 @@ fn read(r: &Row<'_>) -> rusqlite::Result<InboxItem> {
         last_error: r.get(10)?,
         result_summary: r.get(11)?,
         vision_text: r.get(12)?,
+        target_project_id: r.get(13)?,
     })
 }
 
 const COLS: &str = "id, source, mode, content, image_paths, received_at, business_date, status, status_reason, \
-                    attempts, last_error, result_summary, vision_text";
+                    attempts, last_error, result_summary, vision_text, target_project_id";
+
+/// 已完成输入的有限上下文；不包含内部编号或图片文件路径。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationContextItem {
+    pub content: String,
+    pub vision_text: Option<String>,
+    pub result_summary: String,
+    pub mode: String,
+    pub source: String,
+    pub received_at: String,
+}
 
 /// 待确认 / 待追问的计划
 #[derive(Debug, Clone, PartialEq)]
@@ -107,6 +121,26 @@ pub struct NewPending<'a> {
 }
 
 impl Service<'_> {
+    /// 待追问计划的已有对象快照；版本相同但 ID 被复用时，完整行仍能识别变化。
+    pub(crate) fn plan_snapshots(
+        &self,
+        pins: &[super::changes::Pin],
+    ) -> AppResult<Vec<serde_json::Value>> {
+        pins.iter()
+            .map(|pin| {
+                let entity = match pin.entity.as_str() {
+                    "tasks" => "tasks",
+                    "nodes" => "nodes",
+                    "recur_rules" => "recur_rules",
+                    _ => return Err(AppError::Invalid("未知的计划引用对象".into())),
+                };
+                let row = super::oplog::row_json(self.conn, entity, pin.id)?
+                    .ok_or_else(|| AppError::Conflict("相关内容已经变化，请重新输入".into()))?;
+                Ok(serde_json::json!({"entity":entity,"id":pin.id,"row":row}))
+            })
+            .collect()
+    }
+
     /// 登记一条输入，记下当时的时间和业务日期（之后处理时按这个理解"今天 / 明天"）
     pub fn inbox_register(
         &self,
@@ -116,12 +150,37 @@ impl Service<'_> {
         content: &str,
         images: &[String],
     ) -> AppResult<()> {
+        self.inbox_register_with_project(id, source, mode, content, images, None)
+    }
+
+    /// 默认项目与输入在同一条 INSERT 中登记，绑定失败不能留下无归属的可执行请求。
+    pub fn inbox_register_with_project(
+        &self,
+        id: &str,
+        source: &str,
+        mode: &str,
+        content: &str,
+        images: &[String],
+        target_project: Option<i64>,
+    ) -> AppResult<()> {
+        if let Some(project) = target_project {
+            let exists: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND depth=1)",
+                [project],
+                |r| r.get(0),
+            )?;
+            if source != "sticky" || mode != "project" || !exists {
+                return Err(AppError::Invalid(
+                    "便利贴绑定的项目已经不存在或来源无效".into(),
+                ));
+            }
+        }
         let now = self.now_str();
         let today = self.today().format(DATE_FMT).to_string();
         self.conn.execute(
-            "INSERT INTO inbox (id, source, mode, content, image_paths, received_at, business_date, status, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?6)",
-            params![id, source, mode, content, serde_json::to_string(images)?, now, today],
+            "INSERT INTO inbox (id, source, mode, content, image_paths, received_at, business_date, status, updated_at,target_project_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'queued', ?6,?8)",
+            params![id, source, mode, content, serde_json::to_string(images)?, now, today,target_project],
         )?;
         Ok(())
     }
@@ -135,6 +194,64 @@ impl Service<'_> {
             )
             .optional()?
             .ok_or_else(|| AppError::Invalid("这条记录已经不存在了".into()))
+    }
+
+    /// 绑定来源由宿主窗口确认的默认项目，不改写用户原文。
+    pub fn inbox_bind_project(&self, id: &str, project: i64) -> AppResult<()> {
+        let exists: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM nodes WHERE id=?1 AND depth=1)",
+            [project],
+            |r| r.get(0),
+        )?;
+        if !exists {
+            return Err(AppError::Invalid("便利贴绑定的项目已经不存在了".into()));
+        }
+        self.conn.execute(
+            "UPDATE inbox SET target_project_id=?2 WHERE id=?1 AND status='queued' AND source='sticky'",
+            params![id, project],
+        )?;
+        Ok(())
+    }
+
+    /// 所有入口和模式共享最近六轮；只读取本次输入之前、24 小时内成功结束的请求。
+    pub fn conversation_context(&self, id: &str) -> AppResult<Vec<ConversationContextItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT content,vision_text,result_summary,mode,source,received_at FROM inbox
+             WHERE status='done' AND status_reason IS NULL AND result_summary IS NOT NULL
+             AND rowid < (SELECT rowid FROM inbox WHERE id=?1)
+             AND received_at >= strftime('%Y-%m-%dT%H:%M:%S',(SELECT received_at FROM inbox WHERE id=?1),'-24 hours')
+             AND received_at <= (SELECT received_at FROM inbox WHERE id=?1)
+             ORDER BY received_at DESC,rowid DESC LIMIT 6",
+        )?;
+        Ok(stmt
+            .query_map([id], |r| {
+                Ok(ConversationContextItem {
+                    content: r.get(0)?,
+                    vision_text: r.get(1)?,
+                    result_summary: r.get(2)?,
+                    mode: r.get(3)?,
+                    source: r.get(4)?,
+                    received_at: r.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// 新到旧的输入历史，最多读取五十条；保留 Markdown 原文和未发送草稿的职责在前端。
+    pub fn input_history(&self, mode: &str, source: &str) -> AppResult<Vec<String>> {
+        if !matches!(mode, "task" | "project") || !matches!(source, "main" | "quick" | "sticky") {
+            return Err(AppError::Invalid("输入历史的来源或模式无效".into()));
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT content FROM inbox WHERE mode=?1 AND source=?2 AND trim(content)!=''
+             ORDER BY received_at DESC,rowid DESC LIMIT 50",
+        )?;
+        let mut items = stmt
+            .query_map(params![mode, source], |r| r.get(0))?
+            .collect::<Result<Vec<String>, _>>()?;
+        items.retain(|text| !text.trim().is_empty());
+        items.dedup();
+        Ok(items)
     }
 
     pub fn inbox_exists(&self, id: &str) -> AppResult<bool> {
@@ -420,6 +537,76 @@ mod tests {
     use super::super::testing::*;
     use super::*;
     use crate::config::AppConfig;
+
+    #[test]
+    fn 上下文共享跨入口模式且限定六轮一天_历史保留原文() {
+        let conn = db();
+        let clock = clock("2026-10-20 10:00:00");
+        let svc = Service::new(&conn, &clock, &AppConfig::default()).unwrap();
+        svc.inbox_register("old", "main", "task", "过早记录", &[])
+            .unwrap();
+        svc.inbox_set("old", Status::Done, None, None, Some("旧结果"))
+            .unwrap();
+        conn.execute(
+            "UPDATE inbox SET received_at='2026-10-19T09:59:59' WHERE id='old'",
+            [],
+        )
+        .unwrap();
+        for n in 0..8 {
+            let source = ["main", "quick", "sticky"][n % 3];
+            let mode = if n % 2 == 0 { "task" } else { "project" };
+            let id = format!("r{n}");
+            svc.inbox_register(&id, source, mode, &format!("原文{n}"), &[])
+                .unwrap();
+            svc.inbox_set(&id, Status::Done, None, None, Some(&format!("结果{n}")))
+                .unwrap();
+        }
+        svc.inbox_set_vision("r7", "识图中的补充内容").unwrap();
+        let raw = "# 项目\n- **交周报**\n  详细说明";
+        svc.inbox_register("current", "main", "project", raw, &[])
+            .unwrap();
+        let context = svc.conversation_context("current").unwrap();
+        assert_eq!(context.len(), 6);
+        assert_eq!(context[0].content, "原文7");
+        assert_eq!(context[0].vision_text.as_deref(), Some("识图中的补充内容"));
+        assert_eq!(context[5].content, "原文2");
+        assert!(
+            context
+                .iter()
+                .any(|item| item.source == "quick" && item.mode == "task")
+        );
+        assert_eq!(svc.inbox_get("current").unwrap().content, raw);
+        svc.inbox_register("duplicate", "main", "project", raw, &[])
+            .unwrap();
+        assert_eq!(
+            svc.input_history("project", "main")
+                .unwrap()
+                .iter()
+                .filter(|t| t.as_str() == raw)
+                .count(),
+            1
+        );
+        assert!(svc.input_history("task", "unknown").is_err());
+    }
+
+    #[test]
+    fn 无效项目不能留下未绑定的排队输入() {
+        let conn = db();
+        let clock = clock("2026-10-20 10:00:00");
+        let svc = Service::new(&conn, &clock, &AppConfig::default()).unwrap();
+        assert!(
+            svc.inbox_register_with_project(
+                "invalid",
+                "sticky",
+                "project",
+                "添加工作",
+                &[],
+                Some(404)
+            )
+            .is_err()
+        );
+        assert!(!svc.inbox_exists("invalid").unwrap());
+    }
 
     #[test]
     fn 登记_重试_失败() {

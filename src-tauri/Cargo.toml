@@ -1,6 +1,6 @@
 [package]
 name = "cicada"
-version = "0.1.0"
+version = "0.2.0"
 description = "知了：你只管说，它来整理"
 authors = ["HenonBamboo"]
 license = "AGPL-3.0-only"
@@ -38,12 +38,14 @@ keyring = { version = "3", features = ["windows-native"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 base64 = "0.22"
+ring = "=0.17.14"
+semver = "1"
 
 [target.'cfg(windows)'.dependencies]
 # 复用 Tauri 已锁定的 WebView2 接口，仅用于隐藏窗口的内存策略。
 webview2-com = "=0.39.1"
 windows-core = "=0.62.2"
-windows-sys = { version = "=0.61.2", features = ["Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 tempfile = "3"

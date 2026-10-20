@@ -36,6 +36,12 @@ export const getPrompts = () => invoke<PromptView[]>("get_prompts");
 export const savePrompt = (id: string, content: string) =>
   invoke<PromptView>("save_prompt", { id, content });
 export const resetPrompt = (id: string) => invoke<PromptView>("reset_prompt", { id });
+export interface PromptSuggestion {
+  current: string;
+  candidate: string;
+}
+export const suggestPrompt = (id: string, content: string) =>
+  invoke<PromptSuggestion>("suggest_prompt", { id, content });
 export const previewPrompt = (id: string) =>
   invoke<{ content: string; tools: string }>("preview_prompt", { id });
 export const exportData = (format: "json" | "markdown") =>

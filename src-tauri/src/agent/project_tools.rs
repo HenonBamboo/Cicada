@@ -1,7 +1,7 @@
 //! 项目模式的工具定义和参数转换。写入仍走统一变更计划。
 use serde_json::{Value, json};
 
-use super::tools::{Outcome, normalize_time, s, spec};
+use super::tools::{Outcome, markdown, normalize_time, plain_title, s, spec};
 use crate::llm::{ToolCall, ToolSpec};
 use crate::service::Service;
 use crate::service::changes::{Change, TaskRef};
@@ -78,7 +78,7 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "project_query",
-            "查询项目节点及其父子关系、状态、进度所需数据。修改前查询准确编号。",
+            "查询匹配项目/节点、其祖先和完整子树，含备注、截止时间及进度。matchedIds 只表示直接匹配项，nodes 也含上下文。新增或修改前查询当前数据，移动已有节点不要重复添加。",
             json!({"keyword":{"type":"string","description":"可选标题关键词"}}),
             &[],
         ),
@@ -118,7 +118,7 @@ pub fn handle(svc: &Service<'_>, call: &ToolCall, plan: &mut Vec<Change>, today:
         return Outcome::Error("请提供要修改的标题、备注或截止时间".into());
     }
     if call.name == "project_query" {
-        return match svc.query_project_nodes(s(args, "keyword").as_deref()) {
+        return match svc.query_project_context(s(args, "keyword").as_deref()) {
             Ok(nodes) => Outcome::Ok(serde_json::to_string(&nodes).unwrap_or_default()),
             Err(e) => Outcome::Error(e.to_string()),
         };
@@ -128,6 +128,7 @@ pub fn handle(svc: &Service<'_>, call: &ToolCall, plan: &mut Vec<Change>, today:
             s(args, "title")
                 .filter(|t| !t.is_empty())
                 .ok_or_else(|| "缺少 title".to_string())
+                .and_then(plain_title)
         };
         let due = || {
             s(args, "due_at")
@@ -137,19 +138,19 @@ pub fn handle(svc: &Service<'_>, call: &ToolCall, plan: &mut Vec<Change>, today:
         Ok(match call.name.as_str() {
             "project_add" => ProjectChange::Add {
                 title: title()?,
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 due_at: due()?,
             },
             "node_add" => ProjectChange::NodeAdd {
                 parent: reference(args, "parent_id")?,
                 title: title()?,
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 due_at: due()?,
             },
             "node_update" => ProjectChange::Update {
                 node: reference(args, "id")?,
-                title: s(args, "title"),
-                note: s(args, "note"),
+                title: s(args, "title").map(plain_title).transpose()?,
+                note: markdown(args, "note"),
                 due_at: due()?,
             },
             "node_move" => ProjectChange::Move {

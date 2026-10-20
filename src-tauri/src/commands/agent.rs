@@ -1,6 +1,6 @@
 //! 输入框、确认 / 取消、收件箱。所有模型调用都在 Rust 端完成
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, WebviewWindow};
 
 use super::{EVENT_INBOX_CHANGED, with_service};
 use crate::agent::{self, AgentReply, Input, Mode};
@@ -78,6 +78,35 @@ pub fn list_inbox(state: State<'_, AppState>) -> AppResult<Vec<InboxItem>> {
         .try_read()
         .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
     with_service(&state, |s| s.inbox_open())
+}
+
+/// 输入历史按实际调用窗口校验来源，子窗口不能读取主窗口的历史。
+#[tauri::command]
+pub fn list_input_history(
+    window: WebviewWindow,
+    state: State<'_, AppState>,
+    mode: String,
+    source: Option<String>,
+) -> AppResult<Vec<String>> {
+    let _maintenance = state
+        .maintenance
+        .try_read()
+        .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
+    let expected = if window.label() == "main" {
+        "main"
+    } else if window.label() == "quick" {
+        "quick"
+    } else {
+        super::desktop::sticky_id(window.label())?;
+        "sticky"
+    };
+    let source = source.as_deref().unwrap_or("main");
+    if source != expected {
+        return Err(crate::error::AppError::Invalid(
+            "该窗口不能读取其它入口的输入历史".into(),
+        ));
+    }
+    with_service(&state, |s| s.input_history(&mode, source))
 }
 
 /// 收件箱里的"重试"

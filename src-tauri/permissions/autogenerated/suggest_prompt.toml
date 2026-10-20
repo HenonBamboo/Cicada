@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-suggest-prompt"
+description = "Enables the suggest_prompt command without any pre-configured scope."
+commands.allow = ["suggest_prompt"]
+
+[[permission]]
+identifier = "deny-suggest-prompt"
+description = "Denies the suggest_prompt command without any pre-configured scope."
+commands.deny = ["suggest_prompt"]

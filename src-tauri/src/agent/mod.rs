@@ -7,6 +7,8 @@
 //! 5. 原子提交（只有这一步持有写事务，等待模型和用户时不占用写锁）；
 //! 6. 返回结果，发数据变更事件。
 
+mod context;
+mod intent;
 mod project_tools;
 mod recur_tools;
 mod reply;
@@ -32,6 +34,15 @@ use crate::service::oplog::Source;
 use crate::service::{ChangeSet, Service};
 
 pub use reply::{AgentReply, ReplyKind};
+
+/// 固定执行约束供运行与设置页预览共用，不写入可编辑提示词。
+pub(crate) fn runtime_instructions() -> &'static str {
+    intent::INSTRUCTIONS
+}
+
+pub(crate) fn tool_specs(mode: &str) -> Vec<crate::llm::ToolSpec> {
+    intent::specs(tools::specs_for(mode))
+}
 
 /// 一轮里最多调用模型的次数，防止工具调用死循环
 const MAX_ROUNDS: usize = 8;
@@ -92,12 +103,24 @@ struct ClarifyContext {
     messages: Vec<Message>,
     call_id: String,
     plan: Vec<Change>,
+    #[serde(default)]
+    checklist: intent::IntentChecklist,
+    #[serde(default)]
+    reads: intent::ReadScope,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    pins: Vec<Pin>,
+    #[serde(default)]
+    snapshots: Option<Vec<serde_json::Value>>,
 }
 
 /// 待确认时保存的上下文
 #[derive(Serialize, Deserialize)]
 struct ConfirmContext {
     text: String,
+    #[serde(default)]
+    query_only: bool,
 }
 
 enum ModelRef<'a> {
@@ -550,6 +573,7 @@ async fn run(
 
     // 识图：先把图片转成文字，结果缓存，重试时不再识别
     let mut user_text = item.content.clone();
+    let mut intent_source = item.content.clone();
     if !item.image_paths.is_empty() {
         let described = match &item.vision_text {
             Some(t) => t.clone(),
@@ -596,23 +620,64 @@ async fn run(
             "{}\n\n（以下是图片识别出的内容）\n{described}",
             item.content
         );
+        intent_source = format!("{}\n{described}", item.content);
     }
 
-    let (mut messages, mut plan) = match resume {
+    let (mut messages, mut plan, mut checklist, mut reads) = match resume {
         Some((c, answer)) => {
+            if !c.plan.is_empty() {
+                let current = ctx.svc(|s| s.plan_snapshots(&c.pins));
+                if c.snapshots.is_none() || current.as_ref().ok() != c.snapshots.as_ref() {
+                    return fail(
+                        ctx,
+                        id,
+                        &item.image_paths,
+                        "追问期间相关内容已变化，或旧版暂存计划无法安全续答；没有执行改动，请重新输入完整要求。",
+                    );
+                }
+            }
+            if !c.source.is_empty() {
+                intent_source = c.source;
+            }
+            intent_source.push('\n');
+            intent_source.push_str(&answer);
             let mut m = c.messages;
             m.push(Message::ToolResult {
                 call_id: c.call_id,
                 content: format!("用户回答：{answer}"),
                 is_error: false,
             });
-            (m, c.plan)
+            // 完整对话保留，但回答后已有目标仍须重新查询当前状态。
+            (m, c.plan, c.checklist, intent::ReadScope::default())
         }
-        None => (vec![Message::User { text: user_text }], Vec::new()),
+        None => (
+            vec![Message::User { text: user_text }],
+            Vec::new(),
+            intent::IntentChecklist::default(),
+            intent::ReadScope::default(),
+        ),
     };
 
-    let system = ctx.system_prompt(&item.received_at, &item.business_date, &item.mode);
-    let specs = tools::specs_for(&item.mode);
+    let mut system = ctx.system_prompt(&item.received_at, &item.business_date, &item.mode);
+    system.push_str(runtime_instructions());
+    system.push_str(&context::render(ctx.svc(|s| s.conversation_context(id))?));
+    if let Some(project_id) = item.target_project_id.filter(|_| item.mode == "project") {
+        let project = ctx.svc(|s| {
+            Ok(s.query_project_nodes(None)?
+                .into_iter()
+                .find(|n| n.id == project_id && n.depth == 1))
+        })?;
+        let Some(project) = project else {
+            return fail(
+                ctx,
+                id,
+                &item.image_paths,
+                "便利贴绑定的项目已经不存在，请从主窗口选择项目后重试。",
+            );
+        };
+        system.push_str(&format!("\n本次输入来自项目便利贴，未明确指定其它项目时默认作用于以下宿主绑定项目：{}。仍须 project_query 查证，再操作默认项目及其子项。\n", serde_json::json!({"id": project.id, "title": project.title})));
+    }
+    let specs = tool_specs(&item.mode);
     let mut final_text = String::new();
     let mut finished = false;
     for _ in 0..MAX_ROUNDS {
@@ -622,7 +687,24 @@ async fn run(
             images: &[],
             tools: &specs,
         };
-        let resp = match chat.get().chat(&req, &|t| (ctx.on_delta)(id, t)).await {
+        let started = std::sync::atomic::AtomicBool::new(false);
+        let resp = match chat
+            .get()
+            .chat(&req, &|t| {
+                let delta = if started.load(std::sync::atomic::Ordering::Relaxed) {
+                    t
+                } else {
+                    t.trim_start_matches(|c: char| {
+                        c.is_whitespace() || matches!(c, '\u{feff}' | '\u{200b}')
+                    })
+                };
+                if !delta.is_empty() {
+                    started.store(true, std::sync::atomic::Ordering::Relaxed);
+                    (ctx.on_delta)(id, delta);
+                }
+            })
+            .await
+        {
             Ok(r) => r,
             Err(e) => return model_error(ctx, id, &item.image_paths, e),
         };
@@ -644,25 +726,66 @@ async fn run(
             raw: resp.raw.clone(),
         });
         if resp.tool_calls.is_empty() {
+            if let Some(missing) = checklist.incomplete(plan.len(), &intent_source) {
+                messages.push(Message::User {
+                    text: format!("程序校验：{missing} 当前没有提交任何改动。"),
+                });
+                continue;
+            }
             final_text = resp.text;
             finished = true;
             break;
         }
         let calls = resp.tool_calls;
         for (i, call) in calls.iter().enumerate() {
-            let outcome = if call.name == "report_get" {
-                report_tools::handle(ctx, call)
+            let before = plan.len();
+            let mut owner = None;
+            let prepared = if !specs.iter().any(|spec| spec.name == call.name) {
+                Err(format!(
+                    "当前模式不能使用 {}，请用 Tab 切换模式。",
+                    call.name
+                ))
+            } else if intent::is_write(&call.name) {
+                checklist
+                    .prepare(call, &reads, &intent_source)
+                    .map(|(call, id)| {
+                        owner = Some(id);
+                        call
+                    })
             } else {
-                ctx.svc(|s| {
+                Ok(call.clone())
+            };
+            let outcome = match prepared {
+                Err(error) => tools::Outcome::Error(error),
+                Ok(call) if call.name == "intent_checklist" => {
+                    match checklist.declare(call.arguments.as_ref(), &intent_source, plan.len()) {
+                        Ok(text) => tools::Outcome::Ok(text),
+                        Err(error) => tools::Outcome::Error(error),
+                    }
+                }
+                Ok(call) if call.name == "intent_resolve" => {
+                    match checklist.resolve(call.arguments.as_ref(), &reads) {
+                        Ok(text) => tools::Outcome::Ok(text),
+                        Err(error) => tools::Outcome::Error(error),
+                    }
+                }
+                Ok(call) if call.name == "report_get" => report_tools::handle(ctx, &call),
+                Ok(call) => ctx.svc(|s| {
                     Ok(tools::handle_mode(
                         s,
-                        call,
+                        &call,
                         &mut plan,
                         &item.business_date,
                         &item.mode,
                     ))
-                })?
+                })?,
             };
+            if let tools::Outcome::Ok(content) = &outcome {
+                reads.observe(&call.name, content);
+                if let Some(owner) = owner {
+                    checklist.record(&owner, before, plan.len());
+                }
+            }
             match outcome {
                 tools::Outcome::Ok(content) => messages.push(Message::ToolResult {
                     call_id: call.id.clone(),
@@ -683,10 +806,20 @@ async fn run(
                             is_error: true,
                         });
                     }
+                    let (pins, snapshots) = ctx.svc(|s| {
+                        let pins = s.validate_plan(&plan)?.pins;
+                        let snapshots = s.plan_snapshots(&pins)?;
+                        Ok((pins, snapshots))
+                    })?;
                     let context = ClarifyContext {
                         messages,
                         call_id: call.id.clone(),
                         plan,
+                        checklist,
+                        reads,
+                        source: intent_source,
+                        pins,
+                        snapshots: Some(snapshots),
                     };
                     let json = serde_json::to_string(&context)?;
                     let options_json = serde_json::to_string(&options)?;
@@ -716,7 +849,12 @@ async fn run(
             "处理步骤太多，没有完成。请把要求拆开说。",
         );
     }
-    finish(ctx, id, &item.image_paths, plan, final_text).await
+    let text = if plan.is_empty() {
+        final_text
+    } else {
+        checklist.query_answers()
+    };
+    finish(ctx, id, &item.image_paths, plan, text).await
 }
 
 async fn answer(ctx: &Ctx<'_>, id: &str, text: String) -> AppResult<AgentReply> {
@@ -742,7 +880,7 @@ async fn finish(
         let text = if text.trim().is_empty() {
             "知了。".to_string()
         } else {
-            text.trim().to_string()
+            clean_reply(&text)
         };
         ctx.svc(|s| s.inbox_set(id, Status::Done, None, None, Some(&text)))?;
         drop_images(&ctx.inbox_dir, images);
@@ -786,7 +924,10 @@ fn ask_confirm(
     let plan_json = serde_json::to_string(plan)?;
     let pins_json = serde_json::to_string(pins)?;
     let preview_json = serde_json::to_string(preview)?;
-    let context = serde_json::to_string(&ConfirmContext { text: text.into() })?;
+    let context = serde_json::to_string(&ConfirmContext {
+        text: text.into(),
+        query_only: true,
+    })?;
     let expires = now_plus_minutes(ctx.clock, PENDING_MINUTES);
     ctx.svc(|s| {
         s.pending_save(NewPending {
@@ -812,10 +953,11 @@ fn commit(
     preview: &[PreviewItem],
     text: &str,
 ) -> AppResult<AgentReply> {
-    let lead = if text.trim().is_empty() {
-        "知了，办好了。".to_string()
+    // 写入结果完全由实际通过校验并提交的操作生成，模型的结束语不能虚报或泄露内部编号。
+    let lead = if preview.is_empty() {
+        "知了，当前内容已经符合要求。".to_string()
     } else {
-        text.trim().to_string()
+        "知了，已完成以下操作。".to_string()
     };
     let result = ctx.svc(|s| {
         let item = s.inbox_get(id)?;
@@ -831,6 +973,10 @@ fn commit(
             .collect();
         let applied = s.apply_plan(plan, pins, id, Source::Chat)?;
         let mut lead = lead.clone();
+        if !text.trim().is_empty() {
+            lead.push_str("\n\n查询结果：\n");
+            lead.push_str(&clean_reply(text));
+        }
         if !applied.already {
             for parent in s
                 .parent_completion_candidates()?
@@ -844,7 +990,19 @@ fn commit(
             }
         }
         s.pending_delete(id)?;
-        s.inbox_set(id, Status::Done, None, None, Some(&lead))?;
+        let summary = if preview.is_empty() {
+            lead.clone()
+        } else {
+            format!(
+                "{lead}\n{}",
+                preview
+                    .iter()
+                    .map(|p| format!("- {}", p.text))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            )
+        };
+        s.inbox_set(id, Status::Done, None, None, Some(&summary))?;
         Ok(Ok((applied, lead)))
     });
     match result {
@@ -875,6 +1033,11 @@ fn commit(
     }
 }
 
+fn clean_reply(text: &str) -> String {
+    text.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{feff}' | '\u{200b}'))
+        .to_string()
+}
+
 /// 确认按钮或回复"确认"：直接由 Rust 执行，不再经过模型
 pub async fn confirm(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
     ctx.svc(|s| s.pending_expire())?;
@@ -894,7 +1057,7 @@ pub async fn confirm(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
     let pins: Vec<Pin> = serde_json::from_str(&p.versions)?;
     let preview: Vec<PreviewItem> = serde_json::from_str(p.preview.as_deref().unwrap_or("[]"))?;
     let text = serde_json::from_str::<ConfirmContext>(p.context.as_deref().unwrap_or("{}"))
-        .map(|c| c.text)
+        .map(|c| if c.query_only { c.text } else { String::new() })
         .unwrap_or_default();
     let item = ctx.svc(|s| s.inbox_get(id))?;
     commit(ctx, id, &item.image_paths, &plan, &pins, &preview, &text)

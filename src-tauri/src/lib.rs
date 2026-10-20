@@ -15,6 +15,7 @@ pub mod scheduler;
 pub mod secrets;
 pub mod service;
 pub mod state;
+pub mod updater;
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -23,7 +24,7 @@ use tauri::{Emitter, Manager};
 
 use crate::commands::{
     agent as agent_cmd, automation, backup as backup_cmd, board, data, desktop as desktop_cmd,
-    preferences, prompt_settings, settings,
+    preferences, prompt_settings, settings, update,
 };
 use crate::desktop::{MAIN_WINDOW, vibrancy};
 use crate::state::AppState;
@@ -67,6 +68,9 @@ fn report_startup_failure(error: &tauri::Error) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if updater::handle_cli() {
+        return;
+    }
     let result = tauri::Builder::default()
         // 单实例插件必须最先注册
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -100,6 +104,7 @@ pub fn run() {
                 });
             }
             app.manage(state);
+            updater::startup(app.handle());
             desktop::windows::init(app.handle())?;
             desktop::tray::init(app.handle())?;
             if let Err(error) = desktop::shortcuts::init(app.handle()) {
@@ -135,6 +140,7 @@ pub fn run() {
                 agent_cmd::confirm_pending,
                 agent_cmd::cancel_pending,
                 agent_cmd::list_inbox,
+                agent_cmd::list_input_history,
                 agent_cmd::retry_inbox,
                 agent_cmd::discard_inbox,
                 settings::get_model_settings,
@@ -144,6 +150,7 @@ pub fn run() {
                 prompt_settings::save_prompt,
                 prompt_settings::reset_prompt,
                 prompt_settings::preview_prompt,
+                prompt_settings::suggest_prompt,
                 data::export_data,
                 data::import_data,
                 data::list_operation_log,
@@ -155,6 +162,9 @@ pub fn run() {
                 backup_cmd::create_backup,
                 backup_cmd::restore_backup,
                 automation::get_greeting,
+                automation::get_ui_copy,
+                update::get_update,
+                update::install_update,
                 automation::list_reports,
                 automation::read_report,
                 desktop_cmd::get_desktop_bootstrap,

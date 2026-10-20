@@ -11,6 +11,8 @@
     "allow-get-desktop-bootstrap",
     "allow-submit-capture",
     "allow-hide-quick-capture",
-    "allow-open-main"
+    "allow-open-main",
+    "allow-list-input-history",
+    "allow-get-ui-copy"
   ]
 }

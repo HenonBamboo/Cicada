@@ -11,6 +11,11 @@
 
 # Release artifacts
 /releases/
+/.playwright-cli/
+/output/
+/.package-*/
+*.pem
+*.key
 
 # Local configuration and logs
 /.env

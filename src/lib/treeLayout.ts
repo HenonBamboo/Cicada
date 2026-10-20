@@ -1,5 +1,6 @@
 import type { ProjectNode } from "./types";
 import { markdownToPlainText } from "./markdown";
+import { nodeDeadline } from "./nodePresentation";
 
 export interface LaidNode {
   id: number;
@@ -29,7 +30,8 @@ export function estimateWidth(n: ProjectNode): number {
     (w, ch) => w + (ch.charCodeAt(0) > 0x2e80 ? font : font * 0.55),
     0,
   );
-  return 22 + text + (n.progress ? 30 : 0) + (n.done && n.depth > 1 ? 19 : 0);
+  const deadline = n.dueAt ? [...nodeDeadline(n.dueAt)].length * 6 + 10 : 0;
+  return 22 + text + deadline + (n.progress ? 30 : 0) + (n.done && n.depth > 1 ? 19 : 0);
 }
 
 /**

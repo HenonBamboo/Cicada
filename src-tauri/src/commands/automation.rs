@@ -6,6 +6,15 @@ use crate::state::AppState;
 use tauri::State;
 
 #[tauri::command]
+pub fn get_ui_copy(state: State<'_, AppState>) -> AppResult<greetings::UiCopyView> {
+    let _guard = state
+        .maintenance
+        .try_read()
+        .map_err(|_| AppError::Invalid("正在恢复数据，请稍后再试".into()))?;
+    Ok(greetings::UiCopyView::from(&greetings::current(&state)?))
+}
+
+#[tauri::command]
 pub fn get_greeting(state: State<'_, AppState>) -> AppResult<greetings::GreetingView> {
     let _guard = state
         .maintenance

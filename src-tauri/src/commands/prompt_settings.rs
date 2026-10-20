@@ -9,6 +9,19 @@ use serde::Serialize;
 use tauri::State;
 
 #[tauri::command]
+pub async fn suggest_prompt(
+    state: State<'_, AppState>,
+    id: String,
+    content: String,
+) -> AppResult<prompts::suggestions::PromptSuggestion> {
+    let _guard = state
+        .maintenance
+        .try_read()
+        .map_err(|_| AppError::Invalid("正在恢复数据，请稍后再试".into()))?;
+    prompts::suggestions::suggest(&state, PromptId::parse(&id)?, content).await
+}
+
+#[tauri::command]
 pub fn get_prompts(state: State<'_, AppState>) -> AppResult<Vec<PromptView>> {
     let _guard = state
         .maintenance
@@ -89,7 +102,11 @@ pub fn preview_prompt(state: State<'_, AppState>, id: String) -> AppResult<Promp
         "task"
     };
     Ok(PromptPreview {
-        content: prompts::system_prompt(&dir, &config, &now, &date, mode),
-        tools: serde_json::to_string_pretty(&crate::agent::tools::specs_for(mode))?,
+        content: format!(
+            "{}{}",
+            prompts::system_prompt(&dir, &config, &now, &date, mode),
+            crate::agent::runtime_instructions()
+        ),
+        tools: serde_json::to_string_pretty(&crate::agent::tool_specs(mode))?,
     })
 }

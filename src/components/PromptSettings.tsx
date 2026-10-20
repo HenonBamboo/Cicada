@@ -4,7 +4,9 @@ import {
   previewPrompt,
   resetPrompt,
   savePrompt,
+  suggestPrompt,
   type PromptView,
+  type PromptSuggestion,
 } from "../lib/settings";
 import { openFolder } from "../lib/commands";
 export function PromptSettings({ report }: { report: (s: string) => void }) {
@@ -13,6 +15,7 @@ export function PromptSettings({ report }: { report: (s: string) => void }) {
     [draft, setDraft] = useState(""),
     [preview, setPreview] = useState<string | null>(null),
     [compare, setCompare] = useState(false),
+    [suggestion, setSuggestion] = useState<PromptSuggestion | null>(null),
     [busy, setBusy] = useState(false);
   const current = prompts.find((p) => p.id === id);
   useEffect(() => {
@@ -69,6 +72,7 @@ export function PromptSettings({ report }: { report: (s: string) => void }) {
                       setId(p.id);
                       setDraft(saved?.id === p.id ? saved.content : p.content);
                       setPreview(null);
+                      setSuggestion(null);
                     })
                   }
                 >
@@ -82,13 +86,43 @@ export function PromptSettings({ report }: { report: (s: string) => void }) {
               aria-label="提示词内容"
               readOnly={preview !== null}
               value={preview ?? draft}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                setSuggestion(null);
+              }}
               onBlur={() =>
                 void act(async () => {
                   await save();
                 })
               }
             />
+            {suggestion && (
+              <div className="prompt-default">
+                <small>AI 建议稿 · 采用后保存</small>
+                <textarea
+                  className="pr-edit"
+                  aria-label="AI 提示词建议稿"
+                  readOnly
+                  value={suggestion.candidate}
+                />
+                <div className="reply-actions">
+                  <button
+                    className="btn primary"
+                    onClick={() =>
+                      void act(async () => {
+                        update(await savePrompt(id, suggestion.candidate));
+                        setSuggestion(null);
+                      })
+                    }
+                  >
+                    采用建议
+                  </button>
+                  <button className="btn" onClick={() => setSuggestion(null)}>
+                    放弃建议
+                  </button>
+                </div>
+              </div>
+            )}
             {compare && current && (
               <div className="prompt-default">
                 <small>默认内容</small>
@@ -124,11 +158,23 @@ export function PromptSettings({ report }: { report: (s: string) => void }) {
                 className="btn"
                 onClick={() =>
                   void act(async () => {
+                    setPreview(null);
+                    setSuggestion(await suggestPrompt(id, draft));
+                  })
+                }
+              >
+                AI 优化建议
+              </button>
+              <button
+                className="btn"
+                onClick={() =>
+                  void act(async () => {
                     if (preview !== null) {
                       setPreview(null);
                       return;
                     }
                     await save();
+                    setSuggestion(null);
                     const p = await previewPrompt(id);
                     setPreview(
                       p.content + (p.tools ? `\n\n【程序生成 · 工具定义】\n${p.tools}` : ""),
@@ -147,6 +193,7 @@ export function PromptSettings({ report }: { report: (s: string) => void }) {
                   void act(async () => {
                     update(await resetPrompt(id));
                     setPreview(null);
+                    setSuggestion(null);
                   })
                 }
               >

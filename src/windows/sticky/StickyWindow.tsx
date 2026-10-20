@@ -21,6 +21,8 @@ import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import type { ProjectNode, TaskView } from "../../lib/types";
 import { useCapture } from "../../lib/useCapture";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
+import { useUiCopy } from "../../lib/useUiCopy";
+import { nodeDeadline, nodeDescription } from "../../lib/nodePresentation";
 import "./sticky.css";
 
 const COLORS: [StickyColor, string][] = [
@@ -33,11 +35,15 @@ const COLORS: [StickyColor, string][] = [
 function ProjectTree({ node }: { node: ProjectNode }) {
   return (
     <>
-      <div className={`st-node l${node.depth}${node.done ? " done" : ""}`}>
+      <div
+        className={`st-node l${node.depth}${node.done ? " done" : ""}`}
+        title={nodeDescription(node)}
+      >
         <span className="dot" />
         <span className="t">
           <MarkdownInline text={node.title} />
         </span>
+        {node.dueAt && <span className="st-node-due">{nodeDeadline(node.dueAt)}</span>}
         {node.progress && (
           <span className="p">
             {node.progress.done}/{node.progress.total}
@@ -89,7 +95,10 @@ export function StickyWindow() {
   const [alpha, setAlpha] = useState(0.9);
   const [flash, setFlash] = useState<ReadonlySet<number>>(new Set());
   const flashTimer = useRef<number | undefined>(undefined);
-  const capture = useCapture();
+  const capture = useCapture("sticky");
+  const copy = useUiCopy();
+  const setCaptureMode = capture.setMode;
+  const defaultModeApplied = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const reload = useCallback(async () => {
     try {
@@ -97,11 +106,15 @@ export function StickyWindow() {
       setState(next);
       setAlpha(next.opacity);
       setBoard(data);
+      if (!defaultModeApplied.current) {
+        defaultModeApplied.current = true;
+        if (next.kind === "project") setCaptureMode("project");
+      }
       setError(null);
     } catch (error) {
       setError(String(error));
     }
-  }, []);
+  }, [setCaptureMode]);
   useEffect(() => {
     const initialLoad = window.setTimeout(() => void reload(), 0);
     const off = onStickyChanged(() => void reload());
@@ -280,25 +293,40 @@ export function StickyWindow() {
               </>
             )}
             {board && !openTasks.length && !board.tasks.done.length && (
-              <p className="st-empty">今天还没有待办，记一件事吧。</p>
+              <p className="st-empty">{copy.taskEmpty}</p>
             )}
           </>
         )}
       </div>
-      {state?.kind === "today" && (
+      {state && (
         <>
-          <label className="st-input">
+          <div className="st-input">
             <Icon name="plus" />
+            <button
+              type="button"
+              className="st-mode"
+              title="Tab 切换任务/项目"
+              aria-label={`当前${capture.mode === "task" ? "任务" : "项目"}模式，点击切换`}
+              disabled={capture.busy}
+              onClick={() => {
+                capture.setMode(capture.mode === "task" ? "project" : "task");
+                input.current?.focus();
+              }}
+            >
+              {capture.mode === "task" ? "任务" : "项目"}
+            </button>
             <input
               ref={input}
               aria-label={capture.mode === "task" ? "记录任务" : "记录项目"}
               title="Tab 切换任务/项目"
-              placeholder={capture.mode === "task" ? "记一件事，回车就好" : "记项目安排，回车就好"}
+              placeholder={capture.mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
               value={capture.text}
               disabled={capture.busy}
+              maxLength={20_000}
               onChange={(event) => capture.setText(event.target.value)}
               onPaste={capture.paste}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || capture.historyKeyDown(event)) return;
                 if (isModeShortcut(event)) {
                   event.preventDefault();
                   capture.setMode(capture.mode === "task" ? "project" : "task");
@@ -308,7 +336,7 @@ export function StickyWindow() {
                 }
               }}
             />
-          </label>
+          </div>
           {!!capture.images.length && (
             <button
               className="st-attachments"

@@ -98,6 +98,56 @@ impl Service<'_> {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// 模型查询携带匹配项、祖先和整棵子树，防止把已有子项当作不存在再次创建。
+    pub fn query_project_context(&self, keyword: Option<&str>) -> AppResult<serde_json::Value> {
+        let nodes = self.query_project_nodes(None)?;
+        let keyword = keyword.map(normalized_title).filter(|v| !v.is_empty());
+        let matched: HashSet<i64> = nodes
+            .iter()
+            .filter(|n| {
+                keyword.as_ref().is_none_or(|k| {
+                    normalized_title(&n.title).contains(k)
+                        || n.note
+                            .as_ref()
+                            .is_some_and(|note| normalized_title(note).contains(k))
+                })
+            })
+            .map(|n| n.id)
+            .collect();
+        let by_id: HashMap<_, _> = nodes.iter().map(|n| (n.id, n)).collect();
+        let mut selected = matched.clone();
+        for node in &nodes {
+            let mut ancestor = node;
+            let mut in_subtree = matched.contains(&node.id);
+            while let Some(parent) = ancestor.parent_id.and_then(|id| by_id.get(&id)) {
+                if matched.contains(&parent.id) {
+                    in_subtree = true;
+                }
+                ancestor = parent;
+            }
+            if in_subtree {
+                selected.insert(node.id);
+            }
+        }
+        for id in &matched {
+            let mut current = by_id.get(id).copied();
+            while let Some(node) = current {
+                selected.insert(node.id);
+                current = node.parent_id.and_then(|id| by_id.get(&id).copied());
+            }
+        }
+        let matched_ids: Vec<_> = nodes
+            .iter()
+            .filter(|n| matched.contains(&n.id))
+            .map(|n| n.id)
+            .collect();
+        let context: Vec<_> = nodes
+            .into_iter()
+            .filter(|n| selected.contains(&n.id))
+            .collect();
+        Ok(serde_json::json!({"matchedIds": matched_ids, "nodes": context}))
+    }
+
     pub fn parent_completion_candidates(&self) -> AppResult<Vec<NodeBrief>> {
         let nodes = self.query_project_nodes(None)?;
         let by_id: HashMap<_, _> = nodes.iter().map(|n| (n.id, n)).collect();
@@ -132,6 +182,22 @@ pub(super) struct ProjectValidation {
 
 fn invalid(message: impl Into<String>) -> AppError {
     AppError::Invalid(message.into())
+}
+
+/// 忽略大小写、全角 ASCII 和空白差异；不丢弃有语义的标点。
+pub(super) fn normalized_title(title: &str) -> String {
+    title
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(|c| {
+            let c = if ('\u{ff01}'..='\u{ff5e}').contains(&c) {
+                char::from_u32(c as u32 - 0xfee0).unwrap_or(c)
+            } else {
+                c
+            };
+            c.to_lowercase()
+        })
+        .collect()
 }
 
 fn title_valid(title: &str) -> AppResult<()> {
@@ -183,6 +249,29 @@ impl ProjectValidation {
             return Err(invalid(format!("项目节点 {node:?} 不存在或已在本轮删除")));
         }
         Ok(id)
+    }
+
+    fn unique_title(&self, parent: Option<i64>, title: &str, except: Option<i64>) -> AppResult<()> {
+        let title = normalized_title(title);
+        if self.nodes.values().any(|n| {
+            n.parent_id == parent && Some(n.id) != except && normalized_title(&n.title) == title
+        }) {
+            return Err(invalid(
+                "同一位置已经有同名项目或节点，请查询已有内容并修改或移动，不能重复新增",
+            ));
+        }
+        Ok(())
+    }
+
+    fn label(&self, id: i64) -> String {
+        let mut titles = Vec::new();
+        let mut next = Some(id);
+        while let Some(node) = next.and_then(|id| self.nodes.get(&id)) {
+            titles.push(node.title.as_str());
+            next = node.parent_id;
+        }
+        titles.reverse();
+        titles.join(" › ")
     }
 
     fn descendants(&self, id: i64) -> Vec<i64> {
@@ -343,6 +432,7 @@ impl ProjectValidation {
                     None
                 };
                 let depth = parent.map(|p| self.nodes[&p].depth + 1).unwrap_or(1);
+                self.unique_title(parent, title, None)?;
                 if depth > 3 {
                     return Err(invalid("项目最多三层，不能在第三层继续添加节点"));
                 }
@@ -372,7 +462,7 @@ impl ProjectValidation {
                     format!(
                         "添加{}「{}」",
                         if parent.is_none() { "项目" } else { "节点" },
-                        title.trim()
+                        self.label(id)
                     ),
                     false,
                 );
@@ -386,12 +476,13 @@ impl ProjectValidation {
                 let id = self.resolve(node)?;
                 if let Some(t) = title {
                     title_valid(t)?;
+                    self.unique_title(self.nodes[&id].parent_id, t, Some(id))?;
                 }
                 due_valid(due_at)?;
                 self.mark(id);
                 self.ancestors(id);
+                let old = self.label(id);
                 let n = self.nodes.get_mut(&id).unwrap();
-                let old = n.title.clone();
                 if let Some(t) = title {
                     n.title = t.trim().into();
                 }
@@ -406,6 +497,7 @@ impl ProjectValidation {
             ProjectChange::Move { node, parent } => {
                 let id = self.resolve(node)?;
                 let parent = self.resolve(parent)?;
+                self.unique_title(Some(parent), &self.nodes[&id].title, Some(id))?;
                 if self.nodes[&id].parent_id.is_none() {
                     return Err(invalid("项目根节点不能移动到其他节点下"));
                 }
@@ -423,8 +515,8 @@ impl ProjectValidation {
                     self.mark(*d);
                     self.nodes.get_mut(d).unwrap().depth += delta;
                 }
-                let name = self.nodes[&id].title.clone();
-                let target = self.nodes[&parent].title.clone();
+                let name = self.label(id);
+                let target = self.label(parent);
                 self.nodes.get_mut(&id).unwrap().parent_id = Some(parent);
                 self.linked(svc, &descendants, None)?;
                 self.show(
@@ -436,6 +528,10 @@ impl ProjectValidation {
             ProjectChange::Delete { node } => {
                 let id = self.resolve(node)?;
                 let descendants = self.descendants(id);
+                let labels: HashMap<_, _> = descendants
+                    .iter()
+                    .map(|id| (*id, self.label(*id)))
+                    .collect();
                 self.ancestors(id);
                 self.linked(svc, &descendants, Some("删除"))?;
                 for d in descendants {
@@ -446,7 +542,7 @@ impl ProjectValidation {
                         format!(
                             "删除{}「{}」",
                             if n.depth == 1 { "项目" } else { "节点" },
-                            n.title
+                            labels[&d]
                         ),
                         true,
                     );
@@ -495,7 +591,7 @@ impl ProjectValidation {
                     "calendar",
                     format!(
                         "将「{}」安排到 {planned_date}（已有未完成关联任务时复用）",
-                        self.nodes[&id].title
+                        self.label(id)
                     ),
                     false,
                 );
@@ -519,7 +615,6 @@ impl ProjectValidation {
                 "同步取消完成"
             }),
         )?;
-        let n = &self.nodes[&id];
         let prior = if id > 0 && !done {
             let today = svc.today().format(super::DATE_FMT).to_string();
             svc.conn.query_row(
@@ -535,7 +630,7 @@ impl ProjectValidation {
             format!(
                 "{}节点「{}」",
                 if done { "完成" } else { "取消完成" },
-                n.title
+                self.label(id)
             ),
             prior,
         );
@@ -594,6 +689,73 @@ mod tests {
         svc.conn
             .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
             .unwrap()
+    }
+
+    #[test]
+    fn 项目查询保留父链子树备注时间_同父标准化重名禁止新增改名移动() {
+        let db = db();
+        let clock = clock("2026-10-20 10:00:00");
+        let svc = Service::new(&db, &clock, &AppConfig::default()).unwrap();
+        apply(
+            &svc,
+            &[
+                add(None, "项目"),
+                add(Some(reference(1)), "阶段"),
+                add(Some(reference(2)), "工作A"),
+                add(Some(reference(1)), "其它阶段"),
+                add(Some(reference(4)), "工作Ａ"),
+            ],
+        );
+        let stage = id(&svc, "阶段");
+        let leaf = id(&svc, "工作A");
+        apply(
+            &svc,
+            &[change(ProjectChange::Update {
+                node: TaskRef::Id(leaf),
+                title: None,
+                note: Some("- **详细说明**".into()),
+                due_at: Some("2026-10-21T15:00:00".into()),
+            })],
+        );
+        let query = svc.query_project_context(Some("阶段")).unwrap();
+        assert_eq!(query["nodes"].as_array().unwrap().len(), 5);
+        let exact = svc.query_project_context(Some("工作A")).unwrap();
+        let rows = exact["nodes"].as_array().unwrap();
+        assert!(rows.iter().any(|n| n["title"] == "项目"));
+        assert!(
+            rows.iter()
+                .any(|n| n["note"] == "- **详细说明**" && n["dueAt"] == "2026-10-21T15:00:00")
+        );
+        let duplicate = add(Some(TaskRef::Id(stage)), " 工 作 Ａ ");
+        assert!(svc.validate_plan(&[duplicate.clone()]).is_err());
+        // 即使调用方未再次预演，事务本身也不能写入重复节点。
+        assert!(
+            svc.apply_plan(&[duplicate], &[], "duplicate", Source::Chat)
+                .is_err()
+        );
+        let other = id(&svc, "工作Ａ");
+        assert!(
+            svc.validate_plan(&[change(ProjectChange::Move {
+                node: TaskRef::Id(other),
+                parent: TaskRef::Id(stage)
+            })])
+            .is_err()
+        );
+        apply(&svc, &[add(Some(TaskRef::Id(stage)), "工作B")]);
+        assert!(
+            svc.validate_plan(&[change(ProjectChange::Update {
+                node: TaskRef::Id(id(&svc, "工作B")),
+                title: Some("工作a".into()),
+                note: None,
+                due_at: None
+            })])
+            .is_err()
+        );
+        let tree = svc.project_tree().unwrap();
+        assert_eq!(
+            tree[0].children[0].children[0].note.as_deref(),
+            Some("- **详细说明**")
+        );
     }
 
     #[test]
@@ -794,12 +956,12 @@ mod tests {
         assert!(
             v.preview
                 .iter()
-                .any(|p| p.text.contains("完成节点「工作甲」"))
+                .any(|p| p.text.contains("完成节点「项目 › 工作甲」"))
         );
         assert!(
             v.preview
                 .iter()
-                .any(|p| p.text.contains("完成节点「工作乙」"))
+                .any(|p| p.text.contains("完成节点「项目 › 工作乙」"))
         );
         assert_eq!(v.pins.iter().filter(|p| p.entity == "tasks").count(), 2);
     }

@@ -7,17 +7,89 @@ use crate::service::Service;
 use crate::state::AppState;
 use chrono::{Days, NaiveDate, NaiveDateTime, Timelike};
 use rusqlite::{Connection, OptionalExtension, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 const RETRY_SECONDS: i64 = 300;
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GreetingView {
     pub text: String,
     pub nudge: Option<String>,
     pub generated: bool,
+    pub task_placeholder: String,
+    pub project_placeholder: String,
+    pub task_empty: String,
+    pub project_empty: String,
+}
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiCopyView {
+    pub greeting: String,
+    pub nudge: Option<String>,
+    pub task_placeholder: String,
+    pub project_placeholder: String,
+    pub task_empty: String,
+    pub project_empty: String,
+    pub generated: bool,
+}
+impl From<&GreetingView> for UiCopyView {
+    fn from(view: &GreetingView) -> Self {
+        Self {
+            greeting: view.text.clone(),
+            nudge: view.nudge.clone(),
+            task_placeholder: view.task_placeholder.clone(),
+            project_placeholder: view.project_placeholder.clone(),
+            task_empty: view.task_empty.clone(),
+            project_empty: view.project_empty.clone(),
+            generated: view.generated,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct GeneratedCopy {
+    greeting: String,
+    task_placeholder: String,
+    project_placeholder: String,
+    task_empty: String,
+    project_empty: String,
+}
+fn parse_copy(text: &str, fallback: &GreetingView) -> Option<GreetingView> {
+    let raw = text
+        .trim()
+        .strip_prefix("```json")
+        .and_then(|s| s.strip_suffix("```"))
+        .unwrap_or(text)
+        .trim();
+    let copy: GeneratedCopy = serde_json::from_str(raw).ok()?;
+    let fields = [
+        (&copy.greeting, 60),
+        (&copy.task_placeholder, 80),
+        (&copy.project_placeholder, 80),
+        (&copy.task_empty, 60),
+        (&copy.project_empty, 60),
+    ];
+    if fields.iter().any(|(s, max)| {
+        s.trim().is_empty()
+            || s.chars().count() > *max
+            || s.contains(['\n', '\r'])
+            || s.contains("http://")
+            || s.contains("https://")
+    }) {
+        return None;
+    }
+    Some(GreetingView {
+        text: copy.greeting.trim().into(),
+        nudge: fallback.nudge.clone(),
+        generated: true,
+        task_placeholder: copy.task_placeholder.trim().into(),
+        project_placeholder: copy.project_placeholder.trim().into(),
+        task_empty: copy.task_empty.trim().into(),
+        project_empty: copy.project_empty.trim().into(),
+    })
 }
 struct Context {
     date: String,
@@ -58,6 +130,29 @@ fn streak(conn: &Connection, today: NaiveDate) -> AppResult<usize> {
     }
     Ok(count)
 }
+fn project_milestones(conn: &Connection) -> AppResult<Vec<Value>> {
+    let mut stmt = conn.prepare(
+        "WITH RECURSIVE tree(project_id,id,status,done_at) AS (
+           SELECT id,id,status,done_at FROM nodes WHERE parent_id IS NULL AND project_status!='archived'
+           UNION ALL
+           SELECT t.project_id,n.id,n.status,n.done_at FROM nodes n JOIN tree t ON n.parent_id=t.id
+         )
+         SELECT p.title,p.status,MAX(t.done_at) AS latest FROM tree t JOIN nodes p ON p.id=t.project_id
+         WHERE t.status='done' GROUP BY p.id ORDER BY latest DESC,p.id DESC LIMIT 5",
+    )?;
+    Ok(stmt
+        .query_map([], |r| {
+            let title: String = r.get(0)?;
+            let status: String = r.get(1)?;
+            let progress = if status == "done" {
+                "已完成"
+            } else {
+                "阶段性完成"
+            };
+            Ok(json!({"project":title,"progress":progress,"summary":format!("{title}{progress}")}))
+        })?
+        .collect::<Result<Vec<_>, _>>()?)
+}
 fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult<Context> {
     let svc = Service::new(conn, state.clock.as_ref(), config)?;
     let today = svc.today();
@@ -83,6 +178,10 @@ fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult
         },
         nudge,
         generated: false,
+        task_placeholder: "说点什么，比如：明天下午三点提醒我交周报".into(),
+        project_placeholder: "比如：给「知了」加一个阶段：打包发布".into(),
+        task_empty: "今天还没有任务，说一句就能记下。".into(),
+        project_empty: "还没有项目，说一句就能开始。".into(),
     };
     let now = state
         .clock
@@ -99,15 +198,17 @@ fn context(conn: &Connection, state: &AppState, config: &AppConfig) -> AppResult
             Ok(json!({"title":r.get::<_,String>(0)?,"dueAt":r.get::<_,String>(1)?}))
         })?
         .collect::<Result<Vec<Value>, _>>()?;
-    let mut stmt =
-        conn.prepare("SELECT id,title FROM nodes WHERE status='done' AND depth<=2 ORDER BY id")?;
-    let milestones = stmt
-        .query_map([], |r| {
-            Ok(json!({"id":r.get::<_,i64>(0)?,"title":r.get::<_,String>(1)?}))
-        })?
-        .collect::<Result<Vec<Value>, _>>()?;
-    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"milestones":milestones,"longDelayedTask":stale.map(|task|json!({"id":task.id,"title":task.title,"days":task.delay_days}))}).to_string();
-    let fingerprint = format!("{:x}", Sha256::digest(input.as_bytes()));
+    let milestones = project_milestones(conn)?;
+    let mut stmt = conn.prepare("SELECT title FROM nodes WHERE depth=1 AND project_status='active' ORDER BY id DESC LIMIT 5")?;
+    let projects = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let input = json!({"businessDate":today.to_string(),"timeSlot":time_slot,"remaining":left,"streakDays":streak(conn,today)?,"upcomingDue":due,"milestones":milestones,"milestonePolicy":"里程碑只使用项目名称和 progress 表达，不引用具体子任务。项目未勾选完成时只能称为阶段性完成，即使全部子节点已经完成。","activeProjects":projects,"longDelayedTask":stale.map(|task|json!({"title":task.title,"days":task.delay_days}))}).to_string();
+    let mut digest = Sha256::new();
+    digest.update(input.as_bytes());
+    digest.update(crate::prompts::load(&state.paths.prompts(), PromptId::Greeting).as_bytes());
+    digest.update(serde_json::to_vec(&config.model.chat)?);
+    let fingerprint = format!("ui-v1:{:x}", digest.finalize());
     Ok(Context {
         date: today.to_string(),
         slot: time_slot,
@@ -128,11 +229,17 @@ fn cached(conn: &Connection, ctx: &Context, now: NaiveDateTime) -> AppResult<Opt
     let fresh = generated
         || NaiveDateTime::parse_from_str(&created, crate::service::DATETIME_FMT)
             .is_ok_and(|at| (now - at).num_seconds() < RETRY_SECONDS);
-    Ok(fresh.then(|| GreetingView {
-        text,
-        nudge: ctx.fallback.nudge.clone(),
-        generated,
-    }))
+    Ok(if fresh {
+        serde_json::from_str::<GreetingView>(&text)
+            .ok()
+            .map(|mut view| {
+                view.nudge = ctx.fallback.nudge.clone();
+                view.generated = generated;
+                view
+            })
+    } else {
+        None
+    })
 }
 /// 前端命令调用：同步读取当前指纹对应的缓存，不发模型请求。调用方持maintenance读锁。
 pub fn current(state: &AppState) -> AppResult<GreetingView> {
@@ -165,16 +272,11 @@ pub async fn get(state: &AppState) -> AppResult<GreetingView> {
         return Ok(ctx.fallback);
     }
     let response = generate(state, &config, PromptId::Greeting, ctx.input.clone()).await;
-    let generated = response.is_ok();
-    let text = response
+    let view = response
         .ok()
-        .filter(|s| s.lines().count() <= 2 && s.chars().count() <= 120);
-    let generated = generated && text.is_some();
-    let view = GreetingView {
-        text: text.unwrap_or_else(|| ctx.fallback.text.clone()),
-        nudge: ctx.fallback.nudge.clone(),
-        generated,
-    };
+        .and_then(|text| parse_copy(&text, &ctx.fallback))
+        .unwrap_or_else(|| ctx.fallback.clone());
+    let generated = view.generated;
     let now = state
         .clock
         .now()
@@ -187,7 +289,7 @@ pub async fn get(state: &AppState) -> AppResult<GreetingView> {
         if latest.fingerprint != ctx.fingerprint {
             return Ok(latest.fallback);
         }
-        conn.execute("INSERT INTO greetings(business_date,slot,reason,text,created_at) VALUES(?1,?2,?3,?4,?5)",params![ctx.date,ctx.slot,format!("{}:{}",if generated {"model"}else{"fallback"},ctx.fingerprint),view.text,now])?;
+        conn.execute("INSERT INTO greetings(business_date,slot,reason,text,created_at) VALUES(?1,?2,?3,?4,?5)",params![ctx.date,ctx.slot,format!("{}:{}",if generated {"model"}else{"fallback"},ctx.fingerprint),serde_json::to_string(&view)?,now])?;
     }
     Ok(view)
 }
@@ -195,6 +297,21 @@ pub async fn get(state: &AppState) -> AppResult<GreetingView> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 里程碑按项目勾选状态汇总且不暴露子任务() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE nodes(id INTEGER PRIMARY KEY,parent_id INTEGER,title TEXT,status TEXT,project_status TEXT,done_at TEXT);
+          INSERT INTO nodes VALUES(1,NULL,'机械光瓦项目','open','active',NULL),(2,1,'替换螺丝','done',NULL,'2026-10-20T09:00:00'),(3,2,'检查尺寸','done',NULL,'2026-10-20T10:00:00');").unwrap();
+        let milestones = project_milestones(&conn).unwrap();
+        assert_eq!(
+            milestones,
+            vec![
+                json!({"project":"机械光瓦项目","progress":"阶段性完成","summary":"机械光瓦项目阶段性完成"})
+            ]
+        );
+        conn.execute("UPDATE nodes SET status='done',project_status='done',done_at='2026-10-20T11:00:00' WHERE id=1", []).unwrap();
+        assert_eq!(project_milestones(&conn).unwrap()[0]["progress"], "已完成");
+    }
     #[test]
     fn 六个时段边界() {
         assert_eq!(slot(4), "夜深了");
@@ -204,5 +321,31 @@ mod tests {
         assert_eq!(slot(14), "下午好");
         assert_eq!(slot(18), "晚上好");
         assert_eq!(slot(23), "夜深了");
+    }
+
+    #[test]
+    fn 文案包必须完整且单行_不替换固定延期提示() {
+        let fallback = GreetingView {
+            text: "上午好".into(),
+            nudge: Some("延期提示".into()),
+            generated: false,
+            task_placeholder: "任务示例".into(),
+            project_placeholder: "项目示例".into(),
+            task_empty: "没有任务".into(),
+            project_empty: "没有项目".into(),
+        };
+        let valid = r#"{"greeting":"上午好，慢慢来","taskPlaceholder":"比如：明天交周报","projectPlaceholder":"比如：新建读书项目","taskEmpty":"今天还没有任务","projectEmpty":"说一句开始一个项目"}"#;
+        let view = parse_copy(valid, &fallback).unwrap();
+        assert!(view.generated);
+        assert_eq!(view.nudge, fallback.nudge);
+        assert!(parse_copy("普通问候文字", &fallback).is_none());
+        assert!(
+            parse_copy(
+                &valid.replace("今天还没有任务", "第一行\\n第二行"),
+                &fallback
+            )
+            .is_none()
+        );
+        assert!(parse_copy(&valid.replace("说一句开始一个项目", ""), &fallback).is_none());
     }
 }

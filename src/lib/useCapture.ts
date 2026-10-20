@@ -1,10 +1,13 @@
-import { useRef, useState, type ClipboardEvent } from "react";
+import { useCallback, useRef, useState, type ClipboardEvent, type KeyboardEvent } from "react";
 import { submitCapture } from "./desktop";
+import type { InputSource } from "./commands";
+import { useInputHistory } from "./useInputHistory";
 import type { Mode } from "./types";
 
-export function useCapture() {
+export function useCapture(source: Exclude<InputSource, "main">, initialMode: Mode = "task") {
   const [text, setText] = useState("");
-  const [mode, setMode] = useState<Mode>("task");
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const history = useInputHistory(mode, source);
   const [images, setImages] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -14,12 +17,13 @@ export function useCapture() {
   const requestId = useRef<string | null>(null);
   const changeText = (value: string) => {
     requestId.current = null;
+    history.reset();
     setText(value);
   };
-  const changeMode = (value: Mode) => {
+  const changeMode = useCallback((value: Mode) => {
     requestId.current = null;
     setMode(value);
-  };
+  }, []);
   const send = async () => {
     if (sending.current || pendingImages.current || (!text.trim() && !images.length)) return false;
     sending.current = true;
@@ -27,7 +31,8 @@ export function useCapture() {
     setError(null);
     requestId.current ??= crypto.randomUUID();
     try {
-      await submitCapture(text.trim(), mode, images, requestId.current);
+      await submitCapture(text, mode, images, requestId.current);
+      history.reset();
       setText("");
       setImages([]);
       requestId.current = null;
@@ -65,6 +70,11 @@ export function useCapture() {
     setText: changeText,
     mode,
     setMode: changeMode,
+    historyKeyDown: (event: KeyboardEvent<HTMLInputElement>) =>
+      history.onKeyDown(event, text, (value) => {
+        requestId.current = null;
+        setText(value);
+      }),
     images,
     busy: busy || loadingImages,
     error,

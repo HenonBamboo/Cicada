@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
   "description": "主窗口：完整业务入口，子窗口使用独立最小权限。",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -55,6 +57,11 @@
     "allow-open-main",
     "allow-show-quick-capture",
     "allow-hide-quick-capture",
-    "allow-submit-capture"
+    "allow-submit-capture",
+    "allow-list-input-history",
+    "allow-get-ui-copy",
+    "allow-suggest-prompt",
+    "allow-get-update",
+    "allow-install-update"
   ]
 }

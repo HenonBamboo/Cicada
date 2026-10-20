@@ -1,7 +1,7 @@
 {
   "name": "cicada",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "知了：你只管说，它来整理",
   "author": "HenonBamboo",
   "license": "AGPL-3.0-only",

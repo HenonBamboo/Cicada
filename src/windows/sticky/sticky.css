@@ -203,6 +203,24 @@ html[data-window="sticky"] body {
   height: 14px;
   color: var(--st-ink-2);
 }
+.st-mode {
+  border: 0;
+  background: transparent;
+  color: var(--st-ink-2);
+  padding: 0 2px;
+  font-size: 0.76rem;
+  white-space: nowrap;
+}
+.st-node .t {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.st-node-due {
+  margin-left: auto;
+  color: var(--st-ink-2);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
 .st-tree {
   padding: 2px 6px 10px;
   font-size: 0.88rem;

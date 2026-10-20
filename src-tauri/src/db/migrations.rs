@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_inbox_retry.sql"),
+    include_str!("migrations/0003_inbox_project_context.sql"),
 ];
 
 pub const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -106,6 +107,39 @@ mod tests {
         let mut conn = fresh();
         let v = migrate(&mut conn, |_, _| panic!("已是最新，不应备份")).unwrap();
         assert_eq!(v, LATEST_VERSION);
+    }
+
+    #[test]
+    fn 从旧版升级保留原始输入和已有项目() {
+        let mut conn = open_in_memory().unwrap();
+        conn.execute_batch(MIGRATIONS[0]).unwrap();
+        conn.execute_batch(MIGRATIONS[1]).unwrap();
+        conn.pragma_update(None, "user_version", 2).unwrap();
+        let project = add_project(&conn);
+        conn.execute("INSERT INTO inbox(id,source,mode,content,received_at,business_date,status,updated_at) VALUES('old','main','project',?1,?2,'2026-10-17','queued',?2)",
+            params!["# 发布\n- 保留 **完整原文**", NOW]).unwrap();
+        let mut backed_up = false;
+        migrate(&mut conn, |_, version| {
+            assert_eq!(version, 2);
+            backed_up = true;
+            Ok(())
+        })
+        .unwrap();
+        assert!(backed_up);
+        let (text, target): (String, Option<i64>) = conn
+            .query_row(
+                "SELECT content,target_project_id FROM inbox WHERE id='old'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(text, "# 发布\n- 保留 **完整原文**");
+        assert_eq!(target, None);
+        assert_eq!(
+            conn.query_row("SELECT id FROM nodes", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            project
+        );
     }
 
     #[test]

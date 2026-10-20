@@ -1,5 +1,5 @@
 //! 重复任务工具；仅生成计划，写入由统一服务执行。
-use super::tools::{Outcome, s, spec};
+use super::tools::{Outcome, markdown, plain_title, s, spec};
 use crate::llm::{ToolCall, ToolSpec};
 use crate::service::Service;
 use crate::service::changes::Change;
@@ -84,21 +84,21 @@ pub fn handle(svc: &Service<'_>, call: &ToolCall, plan: &mut Vec<Change>, today:
     let parse = || -> Result<RecurChange, String> {
         Ok(match call.name.as_str() {
             "recur_add" => RecurChange::Add {
-                title: s(args, "title").ok_or("缺少title")?,
+                title: plain_title(s(args, "title").ok_or("缺少title")?)?,
                 kind: s(args, "kind").ok_or("缺少kind")?,
                 params: args.get("params").cloned().unwrap_or_else(|| json!({})),
                 remind_time: s(args, "remind_time"),
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 start_date: s(args, "start_date").unwrap_or_else(|| today.into()),
                 end_date: s(args, "end_date"),
             },
             "recur_update" => RecurChange::Update {
                 id: id(args)?,
-                title: s(args, "title"),
+                title: s(args, "title").map(plain_title).transpose()?,
                 kind: s(args, "kind"),
                 params: args.get("params").cloned(),
                 remind_time: s(args, "remind_time"),
-                note: s(args, "note"),
+                note: markdown(args, "note"),
                 start_date: s(args, "start_date"),
                 end_date: s(args, "end_date"),
                 active: match args.get("active") {

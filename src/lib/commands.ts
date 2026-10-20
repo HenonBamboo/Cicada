@@ -70,6 +70,9 @@ export const confirmPending = (requestId: string) =>
 export const cancelPending = (requestId: string) => invoke<Reply>("cancel_pending", { requestId });
 export const undoLast = () => invoke<Reply>("undo_last");
 export const listInbox = () => invoke<InboxItem[]>("list_inbox");
+export type InputSource = "main" | "quick" | "sticky";
+export const listInputHistory = (mode: Mode, source: InputSource) =>
+  invoke<string[]>("list_input_history", { mode, source });
 export const retryInbox = (requestId: string) => invoke<Reply>("retry_inbox", { requestId });
 export const discardInbox = (requestId: string) => invoke<void>("discard_inbox", { requestId });
 export const onInboxChanged = (handler: () => void) => listen("inbox-changed", handler);
@@ -112,6 +115,28 @@ export const readReport = (id: number) =>
 export const getGreeting = () => invoke<GreetingView>("get_greeting");
 export const onGreetingChanged = (handler: (greeting: GreetingView) => void) =>
   listen<GreetingView>("greeting-changed", (e) => handler(e.payload));
+
+export interface UiCopyView {
+  greeting: string;
+  nudge: string | null;
+  taskPlaceholder: string;
+  projectPlaceholder: string;
+  taskEmpty: string;
+  projectEmpty: string;
+  generated: boolean;
+}
+export const getUiCopy = () => invoke<UiCopyView>("get_ui_copy");
+export const onUiCopyChanged = (handler: (copy: UiCopyView) => void) =>
+  listen<UiCopyView>("ui-copy-changed", (e) => handler(e.payload));
+export interface UpdateView {
+  version: string;
+  notes: string;
+  publishedAt: string;
+}
+export const getUpdate = () => invoke<UpdateView | null>("get_update");
+export const installUpdate = () => invoke<void>("install_update");
+export const onUpdateAvailable = (handler: (update: UpdateView) => void) =>
+  listen<UpdateView>("update-available", (e) => handler(e.payload));
 
 export function onConfigChanged(handler: (config: AppConfig) => void): Promise<UnlistenFn> {
   return listen<AppConfig>(EVENT_CONFIG_CHANGED, (e) => handler(e.payload));

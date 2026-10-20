@@ -11,9 +11,13 @@ import { TitleBar } from "../../components/TitleBar";
 import {
   completeOnboarding,
   getDayCompletions,
+  getUpdate,
+  installUpdate,
+  onUpdateAvailable,
   listReports,
   readReport,
   setTaskDone,
+  type UpdateView,
 } from "../../lib/commands";
 import { monthDay } from "../../lib/dates";
 import type { Mode, TaskView } from "../../lib/types";
@@ -42,8 +46,44 @@ export function MainWindow() {
   const [settings, setSettings] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [update, setUpdate] = useState<UpdateView | null>(null);
+  const [updating, setUpdating] = useState(false);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  const installing = useRef(false);
+  const operationBusy = busy || updating;
   const onboardingStarted = useRef(false);
   const onboardingSaving = useRef(false);
+  useEffect(() => {
+    let alive = true;
+    let eventReceived = false;
+    const available = (value: UpdateView) => {
+      eventReceived = true;
+      if (alive) setUpdate(value);
+    };
+    const off = onUpdateAvailable(available);
+    void getUpdate()
+      .then((value) => {
+        if (alive && !eventReceived) setUpdate(value);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+      void off.then((stop) => stop());
+    };
+  }, []);
+  const updateNow = async () => {
+    if (installing.current || busy || onboardingSaving.current) return;
+    installing.current = true;
+    setUpdating(true);
+    setUpdateError(null);
+    try {
+      await installUpdate();
+    } catch (error) {
+      installing.current = false;
+      setUpdateError(String(error));
+      setUpdating(false);
+    }
+  };
   useEffect(() => {
     if (app?.desktopError) showError(app.desktopError);
   }, [app?.desktopError, showError]);
@@ -90,6 +130,7 @@ export function MainWindow() {
   }, [agent.openInbox]);
   useEffect(() => {
     const off = onMainAction((action) => {
+      if (installing.current) return;
       if (action === "settings") setSettings(true);
       if (action === "inbox") {
         setSettings(false);
@@ -98,20 +139,24 @@ export function MainWindow() {
       }
     });
     const errors = onDesktopError(showError);
-    const messages = onDesktopMessage((lead) => setReply({ kind: "message", lead }));
+    const messages = onDesktopMessage((lead) => {
+      if (!installing.current) setReply({ kind: "message", lead });
+    });
     return () => {
       void off.then((f) => f());
       void errors.then((f) => f());
       void messages.then((f) => f());
     };
   }, [showError, setReply]);
-  const submit = (text: string, images: string[]) => agent.submit(text, mode, images);
+  const submit = (text: string, images: string[]) =>
+    installing.current ? Promise.resolve(false) : agent.submit(text, mode, images);
 
   const toggleTask = useCallback(
     (t: TaskView, done: boolean) => {
+      if (installing.current) return;
       setTaskDone(t.id, t.version, done)
         .then((changes) => {
-          if (!busy && changes.parentQuestions?.length) {
+          if (!busy && !installing.current && changes.parentQuestions?.length) {
             setReply({ kind: "message", lead: changes.parentQuestions.join("\n") });
           }
         })
@@ -124,8 +169,10 @@ export function MainWindow() {
   );
 
   const pickDay = async (date: string) => {
+    if (installing.current) return;
     try {
       const list = await getDayCompletions(date);
+      if (installing.current) return;
       setReply({
         kind: "message",
         status: monthDay(date),
@@ -142,9 +189,10 @@ export function MainWindow() {
   };
 
   const showReports = async () => {
-    if (busy) return;
+    if (operationBusy) return;
     try {
       const reports = await listReports();
+      if (installing.current) return;
       const labels = { weekly: "周报", monthly: "月报", yearly: "年报" };
       setReply({
         kind: "message",
@@ -155,14 +203,16 @@ export function MainWindow() {
           text: `${r.period} · ${labels[r.kind]}`,
           chip: `${monthDay(r.generatedAt.slice(0, 10))}生成`,
           onSelect: () => {
+            if (installing.current) return;
             void readReport(r.id)
-              .then((doc) =>
+              .then((doc) => {
+                if (installing.current) return;
                 setReply({
                   kind: "message",
                   status: `${r.period} · ${labels[r.kind]}`,
                   lead: doc.markdown,
-                }),
-              )
+                });
+              })
               .catch(showError);
           },
         })),
@@ -175,7 +225,7 @@ export function MainWindow() {
   // Esc：先关回复，再退出聚焦态
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (e.key !== "Escape" || e.defaultPrevented || installing.current) return;
       if (settings) setSettings(false);
       else if (busy) return;
       else if (reply) setReply(null);
@@ -200,12 +250,21 @@ export function MainWindow() {
 
   return (
     <MotionConfig reducedMotion={motionOn ? "user" : "always"}>
-      <div className={`app${focused ? " focused" : ""}`}>
+      <div
+        className={`app${focused ? " focused" : ""}`}
+        onClickCapture={(event) => {
+          if (installing.current) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
         <TitleBar>
           <button
             className="icon-btn"
             title="快速记录"
             aria-label="快速记录"
+            disabled={updating}
             onClick={() => void showQuick().catch(showError)}
           >
             <Icon name="zap" />
@@ -214,6 +273,7 @@ export function MainWindow() {
             className="icon-btn"
             title="收成便利贴"
             aria-label="收成便利贴"
+            disabled={updating}
             onClick={() => void createSticky("today", undefined, true).catch(showError)}
           >
             <Icon name="sticky" />
@@ -221,7 +281,7 @@ export function MainWindow() {
           {app && (
             <ThemeMenu appearance={app.config.appearance} glassSupported={app.glassSupported} />
           )}
-          <button className="btn ghost" onClick={() => setSettings(!settings)}>
+          <button className="btn ghost" disabled={updating} onClick={() => setSettings(!settings)}>
             {settings ? "返回" : "设置"}
           </button>
         </TitleBar>
@@ -250,7 +310,7 @@ export function MainWindow() {
               onModeChange={setMode}
               onSubmit={submit}
               onFocus={() => setFocused(true)}
-              busy={busy}
+              busy={operationBusy}
               focusRequest={focusRequest}
             />
 
@@ -262,7 +322,11 @@ export function MainWindow() {
             )}
 
             {agent.inbox.length > 0 && (
-              <button className="btn ghost inbox-link" disabled={busy} onClick={agent.openInbox}>
+              <button
+                className="btn ghost inbox-link"
+                disabled={operationBusy}
+                onClick={agent.openInbox}
+              >
                 收件箱 {agent.inbox.length} 条
               </button>
             )}
@@ -273,12 +337,42 @@ export function MainWindow() {
                 onClose={() => void reload()}
               />
             )}
+            {update && !busy && !reply && (
+              <ReplyCard
+                view={{
+                  kind: "message",
+                  status: `发现新版本 ${update.version}`,
+                  lead:
+                    updateError ||
+                    (updating
+                      ? "正在下载并验证更新，完成后会重新启动。"
+                      : update.notes || "有新版本可更新，确认后将替换程序并重新启动。"),
+                  tone: updateError ? "danger" : undefined,
+                }}
+                onClose={() => {
+                  if (!updating) setUpdate(null);
+                }}
+              >
+                <div className="reply-actions">
+                  <button
+                    className="btn primary"
+                    disabled={updating}
+                    onClick={() => void updateNow()}
+                  >
+                    {updating ? "正在更新" : "更新"}
+                  </button>
+                  <button className="btn" disabled={updating} onClick={() => setUpdate(null)}>
+                    稍后
+                  </button>
+                </div>
+              </ReplyCard>
+            )}
             {reply && (
               <ReplyCard view={reply} onClose={() => setReply(null)}>
                 {agent.showInbox && (
                   <InboxList
                     items={agent.inbox}
-                    busy={busy}
+                    busy={operationBusy}
                     onRetry={(item) => {
                       setMode(item.mode);
                       void agent.retry(item);
@@ -292,12 +386,16 @@ export function MainWindow() {
                       <>
                         <button
                           className="btn primary"
-                          disabled={busy}
+                          disabled={operationBusy}
                           onClick={() => void agent.confirm()}
                         >
                           确认
                         </button>
-                        <button className="btn" disabled={busy} onClick={() => void agent.cancel()}>
+                        <button
+                          className="btn"
+                          disabled={operationBusy}
+                          onClick={() => void agent.cancel()}
+                        >
                           算了
                         </button>
                       </>
@@ -305,14 +403,14 @@ export function MainWindow() {
                     {agent.result.kind === "done" && (
                       <button
                         className="btn ghost"
-                        disabled={busy}
+                        disabled={operationBusy}
                         onClick={() => void agent.undo()}
                       >
                         撤销
                       </button>
                     )}
                     {agent.result.kind === "unconfigured" && (
-                      <button className="btn" onClick={() => setSettings(true)}>
+                      <button className="btn" disabled={updating} onClick={() => setSettings(true)}>
                         前往设置
                       </button>
                     )}
@@ -321,7 +419,7 @@ export function MainWindow() {
                         <button
                           key={option}
                           className="btn"
-                          disabled={busy}
+                          disabled={operationBusy}
                           onClick={() => void submit(option, [])}
                         >
                           {option}

@@ -3,6 +3,7 @@ import type { ProjectNode } from "../../lib/types";
 import { nodeKey } from "../../lib/useBoard";
 import { Icon } from "../Icon";
 import { FolderView } from "./FolderView";
+import { useUiCopy } from "../../lib/useUiCopy";
 
 const TreeView = lazy(() => import("./TreeView").then((module) => ({ default: module.TreeView })));
 
@@ -19,6 +20,7 @@ export function ProjectPanel({
   flash: ReadonlySet<string>;
 }) {
   const [view, setView] = useState<View>("folder");
+  const copy = useUiCopy();
   const [archivedOpen, setArchivedOpen] = useState(false);
   const active = projects.filter((p) => p.projectStatus !== "archived");
   const archived = projects.filter((p) => p.projectStatus === "archived");
@@ -58,7 +60,7 @@ export function ProjectPanel({
       </div>
       <div className="panel-body">
         {projects.length === 0 ? (
-          <div className="empty">还没有项目。切到项目模式说一句，比如：新建项目「读书计划」</div>
+          <div className="empty">{copy.projectEmpty}</div>
         ) : view === "folder" ? (
           <FolderView active={active} archived={archived} isFlash={isFlash} />
         ) : (

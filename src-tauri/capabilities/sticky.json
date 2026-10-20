@@ -16,6 +16,8 @@
     "allow-close-sticky",
     "allow-set-sticky-task-done",
     "allow-open-main",
-    "allow-submit-capture"
+    "allow-submit-capture",
+    "allow-list-input-history",
+    "allow-get-ui-copy"
   ]
 }

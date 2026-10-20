@@ -78,6 +78,8 @@ export interface ProjectNode {
   title: string;
   depth: number;
   done: boolean;
+  note: string | null;
+  dueAt: string | null;
   projectStatus: "active" | "done" | "archived" | null;
   progress: Progress | null;
   children: ProjectNode[];

@@ -6,6 +6,7 @@
 //! - 工具定义、数据上下文、安全校验由程序生成，不在可编辑的提示词里。
 
 use std::path::Path;
+pub mod suggestions;
 
 use crate::config::{AppConfig, WeekStart};
 use crate::error::{AppError, AppResult};

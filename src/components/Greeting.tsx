@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { monthDay, period, weekdayName } from "../lib/dates";
 import type { TaskBoard } from "../lib/types";
-import { getGreeting, onGreetingChanged, type GreetingView } from "../lib/commands";
+import { useUiCopy } from "../lib/useUiCopy";
 
 /** 长期延期的天数阈值（docs/产品设计.md 5.3） */
 const STALE_DAYS = 7;
@@ -19,29 +19,15 @@ function useHour() {
 /** 模型问候语沿用原有布局；离线时保留本地模板。 */
 export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
   const hour = useHour();
-  const [greeting, setGreeting] = useState<GreetingView | null>(null);
-  useEffect(() => {
-    let alive = true;
-    const update = (value: GreetingView) => {
-      if (alive) setGreeting(value);
-    };
-    void getGreeting()
-      .then(update)
-      .catch(() => {});
-    const unlisten = onGreetingChanged(update);
-    return () => {
-      alive = false;
-      void unlisten.then((stop) => stop());
-    };
-  }, [date, hour, tasks]);
+  const copy = useUiCopy();
   const left = tasks.today.length + tasks.legacy.length;
   const stale = [...tasks.legacy, ...tasks.today].find((t) => t.delayDays > STALE_DAYS);
   const day = `${monthDay(date)} · ${weekdayName(date)}`;
   return (
     <>
       <h1 className="greeting">
-        {greeting?.generated ? (
-          greeting.text
+        {copy.generated && copy.greeting ? (
+          copy.greeting
         ) : (
           <>
             {period(hour)}，
@@ -57,7 +43,12 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
       </h1>
       <p className="greeting-sub">
         {day}
-        {stale ? (
+        {copy.generated && copy.nudge ? (
+          <>
+            {" "}
+            · <span className="nudge">{copy.nudge}</span>
+          </>
+        ) : stale ? (
           <>
             {" · "}
             <span className="nudge">

@@ -13,6 +13,8 @@ struct Flat {
     depth: i64,
     title: String,
     done: bool,
+    note: Option<String>,
+    due_at: Option<String>,
     project_status: Option<String>,
 }
 
@@ -31,6 +33,8 @@ fn build(id: i64, flat: &HashMap<i64, Flat>, kids: &HashMap<i64, Vec<i64>>) -> P
         title: f.title.clone(),
         depth: f.depth,
         done: f.done,
+        note: f.note.clone(),
+        due_at: f.due_at.clone(),
         project_status: f.project_status.clone(),
         progress,
         children,
@@ -41,7 +45,7 @@ impl Service<'_> {
     /// 全部项目的树。进行中在前，已完成其次，已归档最后（界面折叠在底部）
     pub fn project_tree(&self) -> AppResult<Vec<ProjectNode>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, parent_id, depth, title, status, project_status FROM nodes
+            "SELECT id, parent_id, depth, title, status, project_status, note, due_at FROM nodes
              ORDER BY sort_order, id",
         )?;
         let rows = stmt
@@ -53,6 +57,8 @@ impl Service<'_> {
                     title: r.get(3)?,
                     done: r.get::<_, String>(4)? == "done",
                     project_status: r.get(5)?,
+                    note: r.get(6)?,
+                    due_at: r.get(7)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;

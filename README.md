@@ -8,7 +8,7 @@
 一个安静地待在 Windows 桌面的个人任务与项目助手。<br>
 用自然语言记事、安排任务、推进项目和回顾完成情况，不必反复打开表单整理字段。
 
-[![Version](https://img.shields.io/badge/version-0.1.0-287f73?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-287f73?style=flat-square)](CHANGELOG.md)
 [![Windows 11](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square&logo=windows11)](#下载与使用)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--only-1f4733?style=flat-square)](LICENSE)
@@ -24,20 +24,22 @@
 
 普通待办工具往往要求你先想清楚该点哪里、填哪些字段、放进哪个列表。知了把这些整理工作交给模型：你说出要做的事，它通过受约束的工具调用把内容落到任务、项目、提醒或重复计划中。
 
-| 你可以这样说 | 知了会做什么 |
-| --- | --- |
-| “明天下午三点提醒我交周报” | 创建明日任务并设置提醒 |
-| “每周一提醒我整理本周安排” | 创建重复任务 |
-| “建一个发布官网的项目，分成设计、开发和上线” | 建立最多三层的项目结构 |
-| “把官网项目里的部署安排到今天” | 创建今日任务并关联项目节点 |
-| “这周完成了什么？” | 根据本机完成记录生成总结 |
-| “撤销刚才的操作” | 回退最近一组用户操作 |
+| 你可以这样说                                 | 知了会做什么               |
+| -------------------------------------------- | -------------------------- |
+| “明天下午三点提醒我交周报”                   | 创建明日任务并设置提醒     |
+| “每周一提醒我整理本周安排”                   | 创建重复任务               |
+| “建一个发布官网的项目，分成设计、开发和上线” | 建立最多三层的项目结构     |
+| “把官网项目里的部署安排到今天”               | 创建今日任务并关联项目节点 |
+| “这周完成了什么？”                           | 根据本机完成记录生成总结   |
+| “撤销刚才的操作”                             | 回退最近一组用户操作       |
 
 ## 为什么是知了
 
 ### 只说不点
 
 除了勾选今日任务，任务和项目的新增、修改、查询、移动与删除都从同一个输入框发起。按 `Tab` 即可在任务和项目模式之间切换。
+
+可以直接粘贴 Markdown 列表；原文保存在本机。近 24 小时最近 6 轮对话共享上下文，继续说“把刚才那个改到明天”即可关联前文；真正修改前仍会查询当前数据。
 
 ### 随时记下
 
@@ -61,15 +63,15 @@
 
 ## 下载与使用
 
-知了 `0.1.0` 面向 **Windows 11 x64**，采用无需安装的直接运行 EXE。
+知了 `0.2.0` 面向 **Windows 11 x64**，采用无需安装的直接运行 EXE。
 
-已发布版本可从 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `cicada.exe` 或便携 ZIP。如果 Releases 页面暂时没有可执行文件，请按[从源码运行](#从源码运行)构建。
+从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.0-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
 
-运行前请确认系统已安装 Microsoft Edge WebView2 Runtime。当前程序没有代码签名，Windows 首次启动时可能显示来源提示；请只从本仓库 Releases 下载，并核对同版本的 `SHA256SUMS.txt`。
+运行前请确认系统已安装 Microsoft Edge WebView2 Runtime。当前 EXE 没有 Windows 代码签名，首次启动时可能显示来源提示；请从上述 Releases 下载并核对同版本的 `SHA256SUMS`。应用内更新另有独立的签名校验。
 
 ### 三步开始使用
 
-1. 下载并直接运行 `cicada.exe`。
+1. 下载并直接运行 EXE，或解压便携 ZIP 后运行其中的 `cicada.exe`。
 2. 打开“设置 → 模型”，填写服务商、Base URL、模型名和 API Key。
 3. 回到主界面，说一句要记录、查询或调整的事情。
 
@@ -77,13 +79,14 @@ Base URL 支持 HTTP 和 HTTPS。HTTP 会明文传输请求内容和 API Key，�
 
 ### 默认快捷键
 
-| 操作 | 快捷键 |
-| --- | --- |
-| 快速记录 | `Ctrl+Alt+Space` |
-| 显示 / 隐藏主窗口 | `Ctrl+Alt+Z` |
-| 显示 / 隐藏便利贴 | `Ctrl+Alt+S` |
-| 切换任务 / 项目模式 | `Tab` |
-| 发送 / 换行 | `Enter` / `Shift+Enter` |
+| 操作                | 快捷键                              |
+| ------------------- | ----------------------------------- |
+| 快速记录            | `Ctrl+Alt+Space`                    |
+| 显示 / 隐藏主窗口   | `Ctrl+Alt+Z`                        |
+| 显示 / 隐藏便利贴   | `Ctrl+Alt+S`                        |
+| 切换任务 / 项目模式 | `Tab`                               |
+| 发送 / 换行         | `Enter` / `Shift+Enter`             |
+| 浏览之前的输入      | `↑` / `↓`；多行内容仅在首尾边界生效 |
 
 三个全局快捷键都可以在设置中修改。
 
@@ -104,15 +107,17 @@ Cicada/
 
 使用 AI 功能时，知了只向你选择的模型服务发送完成本次请求所需的文字、查询结果或图片，不会上传整个数据库。完整的数据范围、保留规则和凭据处理方式见[隐私说明](PRIVACY.md)。
 
-升级时退出旧版本，用新 EXE 覆盖原文件即可；业务数据保存在独立的数据目录中，不会随 EXE 替换而删除。更新前仍建议在“设置 → 数据”中创建一次备份。
+程序启动后会在后台检查 GitCode 新版。确认更新后，程序验证清单签名、文件大小和 SHA-256，再替换原路径 EXE 并重启；替换或启动失败时保留或恢复旧程序。也可以退出后手动覆盖 EXE。业务数据保存在独立目录，不会随 EXE 替换而删除；数据库升级前会备份。
 
-## 0.1.0 的范围
+`0.1.0` 没有内置更新器，首次升级到 `0.2.0` 需手动下载。从 `0.2.0` 开始使用应用内更新；请将 EXE 放在当前用户有写入权限的目录。
+
+## 0.2.0 的范围
 
 当前版本聚焦单用户、单机和 Windows 11 x64：
 
 - 提供直接运行 EXE 和便携 ZIP，不提供安装向导；
 - 不包含账户系统、云同步和多人协作；
-- 不包含遥测和应用内自动更新；
+- 不包含遥测；自动更新只以 GitCode 发布文件为依据；
 - 模型调用产生的费用由所配置的模型服务商收取；
 - 其他 Windows 版本和跨平台运行不在本次发布承诺中。
 
@@ -142,7 +147,7 @@ npm run tauri dev
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package.ps1
 ```
 
-生成的 EXE、便携 ZIP 和校验文件位于 `releases/`。维护者发布前应遵循[发布流程](docs/发布流程.md)，确保二进制与对应 Git 标签的源码一致。
+脚本默认将五个发布文件写入独立系统临时目录，并输出其位置；可用 `-OutputDirectory` 指定空目录。正式打包需要仓库外的发布签名私钥；自行开发可直接运行 `npm run tauri -- build --no-bundle`，得到 `src-tauri/target/release/cicada.exe`。维护者遵循[发布流程](docs/发布流程.md)，确保二进制与对应源码标签一致。
 
 ### 项目结构
 
@@ -155,6 +160,7 @@ src-tauri/src/
 ├── llm/              # 模型服务协议适配
 ├── desktop/          # 窗口、托盘、快捷键和通知
 ├── scheduler/        # 日切、提醒、报告和后台处理
+├── updater/          # GitCode 签名检查与便携 EXE 替换
 └── db/               # SQLite 连接与迁移
 docs/                 # 产品设计、视觉规范和交互原型
 scripts/              # 发布打包脚本

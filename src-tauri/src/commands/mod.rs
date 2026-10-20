@@ -9,6 +9,7 @@ pub mod desktop;
 pub mod preferences;
 pub mod prompt_settings;
 pub mod settings;
+pub mod update;
 
 use std::sync::atomic::Ordering;
 

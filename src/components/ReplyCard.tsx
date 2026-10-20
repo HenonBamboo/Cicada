@@ -58,9 +58,9 @@ export function ReplyCard({
       {view.kind === "message" && (
         <div className="reply-body">
           {view.streaming ? (
-            <p className="caret reply-stream">{view.lead.trimStart()}</p>
+            <p className="caret reply-stream">{view.lead.replace(/^[\s\u200B\uFEFF]+/, "")}</p>
           ) : (
-            <MarkdownBlock text={view.lead} />
+            <MarkdownBlock text={view.lead.replace(/^[\s\u200B\uFEFF]+/, "")} />
           )}
           {!!view.items?.length && (
             <ul className="reply-list">

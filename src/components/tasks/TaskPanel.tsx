@@ -3,7 +3,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { relativeDay, remindLabel } from "../../lib/dates";
 import type { TaskBoard, TaskView } from "../../lib/types";
 import { taskKey } from "../../lib/useBoard";
-import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
+import { MarkdownBlock, MarkdownInline, markdownToPlainText } from "../../lib/markdown";
+import { useUiCopy } from "../../lib/useUiCopy";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
 
@@ -126,6 +127,11 @@ function TaskRow({
           <MarkdownInline text={t.title} />
         </div>
         <Meta t={t} today={today} legacy={legacy} />
+        {t.note && (
+          <div className="task-note">
+            <MarkdownBlock text={t.note} />
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -143,6 +149,11 @@ function UpcomingRow({ t, today, flash }: { t: TaskView; today: string; flash: b
           <MarkdownInline text={t.title} />
         </div>
         <Meta t={t} today={today} />
+        {t.note && (
+          <div className="task-note">
+            <MarkdownBlock text={t.note} />
+          </div>
+        )}
       </div>
     </motion.div>
   );
@@ -168,6 +179,7 @@ export function TaskPanel({
   onToggle: (t: TaskView, done: boolean) => void;
 }) {
   const [upcomingOpen, setUpcomingOpen] = useState(false);
+  const copy = useUiCopy();
   // 新加到"之后"的任务需要被看见：有高亮条目时自动展开（默认折叠）
   if (!upcomingOpen && tasks.upcoming.some((t) => flash.has(taskKey(t.id)))) {
     setUpcomingOpen(true);
@@ -196,9 +208,7 @@ export function TaskPanel({
         <SectionHead label="今日" n={tasks.today.length} />
         <AnimatePresence initial={false}>{tasks.today.map((t) => row(t))}</AnimatePresence>
         {tasks.today.length === 0 && (
-          <div className="empty">
-            {tasks.done.length > 0 ? "今天的事都办完了" : "今天还没有待办，记一件事吧。"}
-          </div>
+          <div className="empty">{tasks.done.length > 0 ? "今天的事都办完了" : copy.taskEmpty}</div>
         )}
 
         {tasks.legacy.length > 0 && <SectionHead label="遗留" n={tasks.legacy.length} />}

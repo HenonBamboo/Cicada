@@ -716,6 +716,39 @@ button.sec.collapsed .icon {
   padding-left: 58px;
   font-size: 0.93rem;
 }
+.project-detail {
+  margin: 0 8px 6px 58px;
+  color: var(--text-2);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.project-detail.l2 {
+  margin-left: 82px;
+}
+.project-detail.l3 {
+  margin-left: 108px;
+}
+.project-detail .markdown > *,
+.task-note .markdown > * {
+  margin: 3px 0;
+}
+.project-detail .markdown > :first-child,
+.task-note .markdown > :first-child {
+  margin-top: 0;
+}
+.task-note {
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.node-due {
+  color: var(--text-3);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
 .prog {
   display: flex;
   align-items: center;

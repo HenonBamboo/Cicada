@@ -22,6 +22,10 @@ pub fn spawn_automation(app: AppHandle) {
             let state = app.state::<AppState>();
             if let Ok(greeting) = super::greetings::get(&state).await {
                 let _ = app.emit("greeting-changed", &greeting);
+                let _ = app.emit(
+                    "ui-copy-changed",
+                    super::greetings::UiCopyView::from(&greeting),
+                );
             }
             if Instant::now() >= report_retry {
                 match super::reports::catch_up(&state).await {
