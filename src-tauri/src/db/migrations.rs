@@ -9,6 +9,7 @@ const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0001_init.sql"),
     include_str!("migrations/0002_inbox_retry.sql"),
     include_str!("migrations/0003_inbox_project_context.sql"),
+    include_str!("migrations/0004_token_usage.sql"),
 ];
 
 pub const LATEST_VERSION: u32 = MIGRATIONS.len() as u32;
@@ -62,6 +63,7 @@ mod tests {
         "reports",
         "stickies",
         "tasks",
+        "token_usage",
     ];
     const NOW: &str = "2026-10-17T10:00:00";
 

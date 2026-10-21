@@ -17,6 +17,7 @@ pub const COMMANDS: &[&str] = &[
     "retry_inbox",
     "discard_inbox",
     "get_model_settings",
+    "get_token_usage",
     "get_preferences",
     "save_preferences",
     "get_prompts",

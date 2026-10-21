@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { monthDay, period, weekdayName } from "../lib/dates";
 import type { TaskBoard } from "../lib/types";
 import { useUiCopy } from "../lib/useUiCopy";
+import { Icon } from "./Icon";
 
 /** 长期延期的天数阈值（docs/产品设计.md 5.3） */
 const STALE_DAYS = 7;
@@ -26,6 +27,9 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
   return (
     <>
       <h1 className="greeting">
+        <span className="greeting-icon" aria-hidden="true">
+          <Icon name={hour >= 5 && hour < 18 ? "sun" : "moon"} />
+        </span>
         {copy.greeting ? (
           copy.greeting
         ) : (

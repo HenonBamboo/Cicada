@@ -108,6 +108,64 @@
   color: var(--text-2);
   white-space: pre-wrap;
 }
+.token-usage {
+  margin-top: 12px;
+}
+.token-usage-totals {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0 10px;
+}
+.token-usage-totals dt,
+.token-usage-count,
+.token-usage-details {
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+.token-usage-totals dd {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.token-usage-count {
+  margin: 0 0 12px;
+}
+.token-usage-details summary {
+  width: fit-content;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.token-usage-details > .seg {
+  margin: 10px 0;
+  width: fit-content;
+}
+.token-usage-table {
+  overflow-x: auto;
+}
+.token-usage-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.token-usage-table th,
+.token-usage-table td {
+  padding: 9px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: right;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.token-usage-table th:first-child {
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.token-usage-table small {
+  display: block;
+  color: var(--text-3);
+  margin-top: 3px;
+}
 .reply-actions {
   display: flex;
   align-items: center;

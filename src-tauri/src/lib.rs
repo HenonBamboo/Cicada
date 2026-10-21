@@ -16,6 +16,7 @@ pub mod secrets;
 pub mod service;
 pub mod state;
 pub mod updater;
+pub mod usage;
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -110,6 +111,13 @@ pub fn run() {
                 });
             }
             app.manage(state);
+            let usage_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    usage_app.state::<AppState>().usage_changed.notified().await;
+                    let _ = usage_app.emit_to("main", "token-usage-changed", ());
+                }
+            });
             updater::startup(app.handle());
             desktop::windows::init(app.handle())?;
             desktop::tray::init(app.handle())?;
@@ -150,6 +158,7 @@ pub fn run() {
                 agent_cmd::retry_inbox,
                 agent_cmd::discard_inbox,
                 settings::get_model_settings,
+                settings::get_token_usage,
                 preferences::get_preferences,
                 preferences::save_preferences,
                 prompt_settings::get_prompts,

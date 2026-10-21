@@ -39,10 +39,11 @@ pub(super) async fn generate(
         system.push_str(super::greetings::COPY_RULES);
     }
     let messages = [Message::User { text: context }];
+    let request_id = uuid::Uuid::new_v4().to_string();
     // 流式连接持续有心跳也必须结束，避免长期占用维护读锁阻塞数据恢复。
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(90),
-        model.chat(
+        model.chat_tracked(
             &ChatRequest {
                 system: &system,
                 messages: &messages,
@@ -50,6 +51,19 @@ pub(super) async fn generate(
                 tools: &[],
             },
             &|_| {},
+            crate::usage::UsageContext {
+                db: &state.db,
+                clock: state.clock.as_ref(),
+                config,
+                endpoint,
+                purpose: if prompt == PromptId::Greeting {
+                    "ui_copy"
+                } else {
+                    "report"
+                },
+                request_id: &request_id,
+                notify: Some(&state.usage_changed),
+            },
         ),
     )
     .await

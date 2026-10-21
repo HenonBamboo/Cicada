@@ -11,6 +11,7 @@ mod sse;
 
 use std::time::Duration;
 
+use crate::usage::{TokenUsage, UsageContext};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -221,9 +222,33 @@ impl Model {
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
     ) -> Result<ChatResponse, LlmError> {
+        self.chat_observed(req, on_text, &|_| {}).await
+    }
+
+    /// 每个实际模型请求记录一次；guard 在外层超时取消时也会保存已有用量。
+    pub async fn chat_tracked(
+        &self,
+        req: &ChatRequest<'_>,
+        on_text: &(dyn Fn(&str) + Send + Sync),
+        usage: UsageContext<'_>,
+    ) -> Result<ChatResponse, LlmError> {
+        let mut attempt = usage.begin();
+        let result = self
+            .chat_observed(req, on_text, &|usage| attempt.observe(usage))
+            .await;
+        attempt.completed(result.is_ok());
+        result
+    }
+
+    async fn chat_observed(
+        &self,
+        req: &ChatRequest<'_>,
+        on_text: &(dyn Fn(&str) + Send + Sync),
+        on_usage: &(dyn Fn(TokenUsage) + Send + Sync),
+    ) -> Result<ChatResponse, LlmError> {
         match self {
-            Self::OpenAi(c) => c.chat(req, on_text).await,
-            Self::Claude(c) => c.chat(req, on_text).await,
+            Self::OpenAi(c) => c.chat(req, on_text, on_usage).await,
+            Self::Claude(c) => c.chat(req, on_text, on_usage).await,
             #[cfg(test)]
             Self::Scripted(m) => m.chat(req, on_text),
         }

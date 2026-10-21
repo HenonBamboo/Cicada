@@ -91,6 +91,31 @@ export const testModel = (target: "chat" | "vision") =>
   invoke<{ ok: boolean; latencyMs: number; toolCalls: boolean; message: string }>("test_model", {
     target,
   });
+export interface UsageGroup {
+  provider: string;
+  model: string;
+  purpose: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  requests: number;
+  unknownRequests: number;
+}
+export interface UsagePeriod {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  requests: number;
+  unknownRequests: number;
+  byModel: UsageGroup[];
+  byPurpose: UsageGroup[];
+}
+export interface UsageSummary {
+  today: UsagePeriod;
+  month: UsagePeriod;
+}
+export const getTokenUsage = () => invoke<UsageSummary>("get_token_usage");
+export const onTokenUsageChanged = (handler: () => void) => listen("token-usage-changed", handler);
 export const openFolder = (which: string) => invoke<void>("open_folder", { which });
 export const listBackups = () => invoke<BackupEntry[]>("list_backups");
 export const createBackup = () => invoke<BackupEntry>("create_backup");

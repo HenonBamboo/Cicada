@@ -93,6 +93,7 @@ pub struct Ctx<'a> {
     pub on_delta: &'a (dyn Fn(&str, &str) + Send + Sync),
     /// 数据变更（通知所有窗口刷新）
     pub on_changes: &'a (dyn Fn(&ChangeSet) + Send + Sync),
+    pub usage_notify: Option<&'a tokio::sync::Notify>,
     /// 测试时注入脚本化模型
     #[cfg(test)]
     pub test_model: Option<&'a Model>,
@@ -180,6 +181,29 @@ fn now_plus_minutes(clock: &dyn Clock, m: i64) -> String {
 }
 
 impl Ctx<'_> {
+    fn usage<'a>(
+        &'a self,
+        purpose: &'a str,
+        request_id: &'a str,
+    ) -> crate::usage::UsageContext<'a> {
+        crate::usage::UsageContext {
+            db: self.db,
+            clock: self.clock,
+            config: &self.config,
+            endpoint: if purpose == "vision" {
+                self.config
+                    .model
+                    .vision
+                    .as_ref()
+                    .unwrap_or(&self.config.model.chat)
+            } else {
+                &self.config.model.chat
+            },
+            purpose,
+            request_id,
+            notify: self.usage_notify,
+        }
+    }
     /// 在数据库锁内执行一段业务操作
     fn svc<T>(&self, f: impl FnOnce(&Service<'_>) -> AppResult<T>) -> AppResult<T> {
         let conn = self
@@ -623,7 +647,11 @@ async fn run(
                     images: &images,
                     tools: &[],
                 };
-                match vision.get().chat(&req, &|_| {}).await {
+                match vision
+                    .get()
+                    .chat_tracked(&req, &|_| {}, ctx.usage("vision", id))
+                    .await
+                {
                     Ok(r) => {
                         ctx.svc(|s| s.inbox_set_vision(id, &r.text))?;
                         r.text
@@ -758,7 +786,7 @@ async fn run(
         let resp = match chat
             .get()
             // 工具中间文字可能含内部定位或未提交的完成声明，校验前不直出给界面。
-            .chat(&req, &|_| {})
+            .chat_tracked(&req, &|_| {}, ctx.usage("chat", id))
             .await
         {
             Ok(r) => r,

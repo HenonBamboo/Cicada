@@ -21,6 +21,7 @@ import type { Appearance } from "../lib/types";
 import { PreferenceSections } from "./PreferenceSections";
 import { PromptSettings } from "./PromptSettings";
 import { DataExchange } from "./DataExchange";
+import { TokenUsage } from "./TokenUsage";
 import packageInfo from "../../package.json";
 
 const PROVIDERS: [Provider, string, string][] = [
@@ -435,6 +436,7 @@ export function Settings({
                 功能时，会把完成本次请求所需的文字或图片发送给你选择的模型服务商。
               </div>
             </div>
+            <TokenUsage />
           </section>
           <PromptSettings key={promptRevision} report={setMessage} />
           {preferences && appearance && (

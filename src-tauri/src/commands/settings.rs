@@ -55,6 +55,17 @@ pub fn get_model_settings(state: State<'_, AppState>) -> AppResult<ModelSettings
     Ok(view(&state, &m))
 }
 
+#[tauri::command]
+pub fn get_token_usage(state: State<'_, AppState>) -> AppResult<crate::usage::UsageSummary> {
+    let _maintenance = state
+        .maintenance
+        .try_read()
+        .map_err(|_| AppError::Invalid("正在恢复数据，请稍后再试".into()))?;
+    let config = state.config.lock().map_err(poisoned)?.clone();
+    let conn = state.db.lock().map_err(poisoned)?;
+    crate::usage::query(&conn, state.clock.as_ref(), &config)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveModel {
@@ -189,7 +200,23 @@ pub async fn test_model(state: State<'_, AppState>, target: String) -> AppResult
         tools: if target == "vision" { &[] } else { &tools },
     };
     let start = Instant::now();
-    let r = model.chat(&req, &|_| {}).await;
+    let request_id = uuid::Uuid::new_v4().to_string();
+    let config = state.config.lock().map_err(poisoned)?.clone();
+    let r = model
+        .chat_tracked(
+            &req,
+            &|_| {},
+            crate::usage::UsageContext {
+                db: &state.db,
+                clock: state.clock.as_ref(),
+                config: &config,
+                endpoint: &ep,
+                purpose: "connection_test",
+                request_id: &request_id,
+                notify: Some(&state.usage_changed),
+            },
+        )
+        .await;
     let ms = start.elapsed().as_millis() as u64;
     Ok(match r {
         Ok(resp) => {

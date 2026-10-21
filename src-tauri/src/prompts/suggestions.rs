@@ -39,9 +39,10 @@ pub async fn suggest(
         })
         .to_string(),
     }];
+    let request_id = uuid::Uuid::new_v4().to_string();
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(45),
-        model.chat(
+        model.chat_tracked(
             &ChatRequest {
                 system,
                 messages: &messages,
@@ -49,6 +50,15 @@ pub async fn suggest(
                 tools: &[],
             },
             &|_| {},
+            crate::usage::UsageContext {
+                db: &state.db,
+                clock: state.clock.as_ref(),
+                config: &config,
+                endpoint,
+                purpose: "prompt_suggestion",
+                request_id: &request_id,
+                notify: Some(&state.usage_changed),
+            },
         ),
     )
     .await

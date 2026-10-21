@@ -1,5 +1,6 @@
 //! OpenAI 兼容接口（/chat/completions，流式）：DeepSeek、通义千问、Kimi、智谱及自定义服务
 
+use crate::usage::TokenUsage;
 use serde_json::{Value, json};
 
 use super::sse::for_each_event;
@@ -26,6 +27,7 @@ impl OpenAiClient {
         &self,
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
+        on_usage: &(dyn Fn(TokenUsage) + Send + Sync),
     ) -> Result<ChatResponse, LlmError> {
         let body = build_body(&self.model, req);
         let resp = self
@@ -41,7 +43,14 @@ impl OpenAiClient {
             return Err(LlmError::from_status(status, &text));
         }
         let mut acc = Accumulator::default();
-        for_each_event(resp, |data| acc.push(data, on_text)).await?;
+        for_each_event(resp, |data| {
+            let result = acc.push(data, on_text);
+            if let Some(usage) = acc.usage {
+                on_usage(usage);
+            }
+            result
+        })
+        .await?;
         acc.finish()
     }
 }
@@ -74,7 +83,7 @@ pub(super) fn build_body(model: &str, req: &ChatRequest<'_>) -> Value {
             } => json!({ "role": "tool", "tool_call_id": call_id, "content": content }),
         });
     }
-    let mut body = json!({ "model": model, "stream": true, "messages": messages });
+    let mut body = json!({ "model": model, "stream": true, "stream_options": {"include_usage": true}, "messages": messages });
     if !req.tools.is_empty() {
         body["tools"] = req
             .tools
@@ -103,6 +112,7 @@ pub(super) struct Accumulator {
     text: String,
     calls: Vec<PartialCall>,
     finish: Option<String>,
+    usage: Option<TokenUsage>,
 }
 
 impl Accumulator {
@@ -116,6 +126,18 @@ impl Accumulator {
         }
         let v: Value =
             serde_json::from_str(data).map_err(|e| LlmError::BadResponse(e.to_string()))?;
+        if let Some(value) = v.get("usage").filter(|v| v.is_object()) {
+            let input = value.get("prompt_tokens").and_then(Value::as_u64);
+            let output = value.get("completion_tokens").and_then(Value::as_u64);
+            self.usage = Some(TokenUsage {
+                input_tokens: input,
+                output_tokens: output,
+                total_tokens: value
+                    .get("total_tokens")
+                    .and_then(Value::as_u64)
+                    .or_else(|| input?.checked_add(output?)),
+            });
+        }
         if let Some(err) = v.get("error") {
             let msg = err
                 .get("message")
@@ -230,6 +252,30 @@ mod tests {
     fn noop(_: &str) {}
 
     #[test]
+    fn 用量末块与重复快照不累加() {
+        let mut acc = Accumulator::default();
+        let chunk = r#"{"choices":[],"usage":{"prompt_tokens":15,"completion_tokens":64,"total_tokens":79,"prompt_tokens_details":{"cached_tokens":10},"completion_tokens_details":{"reasoning_tokens":60}}}"#;
+        acc.push(chunk, &noop).unwrap();
+        acc.push(chunk, &noop).unwrap();
+        assert_eq!(
+            acc.usage,
+            Some(TokenUsage {
+                input_tokens: Some(15),
+                output_tokens: Some(64),
+                total_tokens: Some(79)
+            })
+        );
+        let mut missing = Accumulator::default();
+        missing
+            .push(
+                r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+                &noop,
+            )
+            .unwrap();
+        assert!(missing.usage.is_none());
+    }
+
+    #[test]
     fn 累积文字与工具调用() {
         let mut acc = Accumulator::default();
         let chunks = [
@@ -316,5 +362,6 @@ mod tests {
         assert_eq!(body["messages"][1]["content"][1]["text"], "看图");
         assert_eq!(body["messages"][3]["role"], "tool");
         assert_eq!(body["tools"][0]["function"]["name"], "t");
+        assert_eq!(body["stream_options"]["include_usage"], true);
     }
 }

@@ -28,6 +28,7 @@
     "allow-retry-inbox",
     "allow-discard-inbox",
     "allow-get-model-settings",
+    "allow-get-token-usage",
     "allow-get-preferences",
     "allow-save-preferences",
     "allow-get-prompts",

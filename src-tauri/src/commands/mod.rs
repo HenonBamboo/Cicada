@@ -103,6 +103,7 @@ macro_rules! agent_ctx {
             secrets: $state.secrets.as_ref(),
             on_delta: &__on_delta,
             on_changes: &__on_changes,
+            usage_notify: Some(&$state.usage_changed),
             #[cfg(test)]
             test_model: None,
         };

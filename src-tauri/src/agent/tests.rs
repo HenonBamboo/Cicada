@@ -41,6 +41,7 @@ impl Env {
             secrets: &self.secrets,
             on_delta: &|_, _| {},
             on_changes: &|_| {},
+            usage_notify: None,
             test_model: model,
         }
     }

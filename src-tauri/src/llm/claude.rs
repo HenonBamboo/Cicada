@@ -6,6 +6,7 @@
 //! - stop_reason 为 max_tokens / refusal 时不执行本轮工具；
 //! - 官方地址上的新模型默认开启服务端回退（拒绝时由服务端换模型重试）。
 
+use crate::usage::TokenUsage;
 use serde_json::{Map, Value, json};
 
 use super::sse::for_each_event;
@@ -48,6 +49,7 @@ impl ClaudeClient {
         &self,
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
+        on_usage: &(dyn Fn(TokenUsage) + Send + Sync),
     ) -> Result<ChatResponse, LlmError> {
         let mut body = build_body(&self.model, req);
         let mut rb = self
@@ -66,7 +68,14 @@ impl ClaudeClient {
             return Err(LlmError::from_status(status, &text));
         }
         let mut acc = Accumulator::default();
-        for_each_event(resp, |data| acc.push(data, on_text)).await?;
+        for_each_event(resp, |data| {
+            let result = acc.push(data, on_text);
+            if let Some(usage) = acc.usage {
+                on_usage(usage);
+            }
+            result
+        })
+        .await?;
         acc.finish()
     }
 }
@@ -150,6 +159,10 @@ pub(super) struct Accumulator {
     partial: Vec<String>,
     text: String,
     stop_reason: Option<String>,
+    usage: Option<TokenUsage>,
+    input_tokens: Option<u64>,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
 }
 
 impl Accumulator {
@@ -160,6 +173,46 @@ impl Accumulator {
     ) -> Result<(), LlmError> {
         let v: Value =
             serde_json::from_str(data).map_err(|e| LlmError::BadResponse(e.to_string()))?;
+        let kind = v["type"].as_str().unwrap_or_default();
+        if matches!(kind, "message_start" | "message_delta") {
+            let usage = if kind == "message_start" {
+                v.pointer("/message/usage")
+            } else {
+                v.get("usage")
+            };
+            if let Some(value) = usage.filter(|u| u.is_object()) {
+                if let Some(n) = value.get("input_tokens").and_then(Value::as_u64) {
+                    self.input_tokens = Some(n);
+                }
+                if let Some(n) = value.get("cache_read_input_tokens").and_then(Value::as_u64) {
+                    self.cache_read_tokens = n;
+                }
+                if let Some(n) = value
+                    .get("cache_creation_input_tokens")
+                    .and_then(Value::as_u64)
+                {
+                    self.cache_write_tokens = n;
+                }
+                let input = self.input_tokens.and_then(|n| {
+                    n.checked_add(self.cache_read_tokens)?
+                        .checked_add(self.cache_write_tokens)
+                });
+                // message_start 的输出计数只是初始快照，缺少后续用量时不能冒充最终结果。
+                let output = if kind == "message_start" {
+                    None
+                } else {
+                    value
+                        .get("output_tokens")
+                        .and_then(Value::as_u64)
+                        .or_else(|| self.usage.and_then(|u| u.output_tokens))
+                };
+                self.usage = Some(TokenUsage {
+                    input_tokens: input,
+                    output_tokens: output,
+                    total_tokens: input.and_then(|n| n.checked_add(output?)),
+                });
+            }
+        }
         match v["type"].as_str().unwrap_or_default() {
             "content_block_start" => {
                 let idx = v["index"].as_u64().unwrap_or(0) as usize;
@@ -279,6 +332,31 @@ mod tests {
     use super::*;
 
     fn noop(_: &str) {}
+
+    #[test]
+    fn 用量累计快照与缓存不重复计数() {
+        let mut acc = Accumulator::default();
+        acc.push(r#"{"type":"message_start","message":{"usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":5,"output_tokens":1}}}"#, &noop).unwrap();
+        assert!(!acc.usage.unwrap().complete());
+        acc.push(
+            r#"{"type":"message_delta","usage":{"output_tokens":6}}"#,
+            &noop,
+        )
+        .unwrap();
+        acc.push(
+            r#"{"type":"message_delta","usage":{"output_tokens":8}}"#,
+            &noop,
+        )
+        .unwrap();
+        assert_eq!(
+            acc.usage,
+            Some(TokenUsage {
+                input_tokens: Some(35),
+                output_tokens: Some(8),
+                total_tokens: Some(43)
+            })
+        );
+    }
 
     #[test]
     fn 累积思考_文字与工具调用并保留原文() {

@@ -26,6 +26,7 @@ pub struct AppState {
     pub secrets: Box<dyn SecretStore>,
     /// 唤醒后台收件箱处理（例如刚配置好模型）
     pub wake: tokio::sync::Notify,
+    pub usage_changed: tokio::sync::Notify,
     /// 数据恢复持写锁；普通业务操作持读锁。
     pub maintenance: tokio::sync::RwLock<()>,
     pub desktop_error: Mutex<Option<String>>,
@@ -67,6 +68,7 @@ impl AppState {
             glass_supported: AtomicBool::new(false),
             secrets,
             wake: tokio::sync::Notify::new(),
+            usage_changed: tokio::sync::Notify::new(),
             maintenance: tokio::sync::RwLock::new(()),
             desktop_error: Mutex::new(backup_warning),
         })
@@ -108,7 +110,7 @@ mod tests {
         assert!(state.paths.db().is_file());
         let conn = state.db.lock().unwrap();
         assert_eq!(db::schema_version(&conn).unwrap(), db::LATEST_VERSION);
-        assert_eq!(db::list_tables(&conn).unwrap().len(), 11);
+        assert_eq!(db::list_tables(&conn).unwrap().len(), 12);
     }
 
     #[test]

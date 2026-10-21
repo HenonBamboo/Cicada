@@ -61,6 +61,17 @@
   font-style: normal;
   color: var(--accent);
 }
+.greeting-icon {
+  display: inline-flex;
+  margin-inline-end: 0.4em;
+  color: var(--accent);
+  font-size: 0.82em;
+  vertical-align: -0.12em;
+}
+.greeting-icon .icon {
+  width: 1em;
+  height: 1em;
+}
 .focused .greeting {
   font-size: 1.36rem;
 }
