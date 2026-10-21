@@ -218,7 +218,10 @@ async fn 添加任务_写入并可追溯到请求() {
         .unwrap();
     assert_eq!(r.kind, ReplyKind::Done);
     assert_eq!(r.lead, "知了，已完成以下操作。");
-    assert_eq!(r.items[0].text, "添加「交周报」（计划 2026-10-18，15:00 提醒）");
+    assert_eq!(
+        r.items[0].text,
+        "添加「交周报」（计划 2026-10-18，15:00 提醒）"
+    );
     assert_eq!(
         env.count("SELECT COUNT(*) FROM tasks WHERE remind_at = '2026-10-18T15:00:00'"),
         1

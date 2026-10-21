@@ -282,11 +282,10 @@ impl AppConfig {
                     && let Some(desktop) = value.get_mut("desktop").and_then(Value::as_object_mut)
                     && !desktop.contains_key("startupView")
                 {
-                    let sticky = version >= 2
-                        && desktop
-                            .get("showStickiesOnStartup")
-                            .and_then(Value::as_bool)
-                            == Some(true);
+                    let sticky = desktop
+                        .get("showStickiesOnStartup")
+                        .and_then(Value::as_bool)
+                        == Some(true);
                     desktop.insert(
                         "startupView".into(),
                         Value::String(if sticky { "sticky" } else { "main" }.into()),
@@ -297,12 +296,10 @@ impl AppConfig {
             .and_then(|mut cfg| {
                 let mut migrated = false;
                 if cfg.version < 2 {
-                    // v1 的发布默认会同时唤起便利贴，且 Alt+Space 在 Windows 上常被系统工具占用。
-                    // 这是预发布配置的一次性默认值迁移；用户之后仍可在设置中重新选择。
+                    // v1 的 Alt+Space 在 Windows 上常被系统工具占用；启动选择保留旧开关含义。
                     if cfg.desktop.quick_shortcut == "Alt+Space" {
                         cfg.desktop.quick_shortcut = "Ctrl+Alt+Space".into();
                     }
-                    cfg.desktop.startup_view = StartupView::Main;
                     migrated = true;
                 }
                 if cfg.version < CONFIG_VERSION {
@@ -404,11 +401,14 @@ mod tests {
     fn 旧便利贴启动开关迁移为互斥启动界面() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.json");
-        for (show, expected) in [(false, StartupView::Main), (true, StartupView::Sticky)] {
+        for (version, show, expected) in [1, 2, 3].into_iter().flat_map(|version| {
+            [(false, StartupView::Main), (true, StartupView::Sticky)]
+                .map(|(show, expected)| (version, show, expected))
+        }) {
             std::fs::write(
                 &path,
                 serde_json::json!({
-                    "version": 3,
+                    "version": version,
                     "onboardingCompleted": true,
                     "desktop": {"showStickiesOnStartup": show}
                 })

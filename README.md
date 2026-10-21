@@ -67,6 +67,8 @@
 
 从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.3-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
 
+**从 0.2.2 及更早版本升级：** 本版更换了更新签名密钥，请先退出旧程序，手动下载新版覆盖原 EXE。数据和自定义提示词会保留；从 0.2.3 起，后续版本继续支持应用内更新。
+
 运行前请确认系统已安装 Microsoft Edge WebView2 Runtime。当前 EXE 没有 Windows 代码签名，首次启动时可能显示来源提示；请从上述 Releases 下载并核对同版本的 `SHA256SUMS`。应用内更新另有独立的签名校验。
 
 ### 三步开始使用
@@ -110,7 +112,7 @@ Cicada/
 
 程序每次启动后在后台检查一次 GitCode 新版，也可在“设置 → 关于”手动检查和更新，不进行定时检查。确认更新后，程序验证清单签名、文件大小和 SHA-256，再替换原路径 EXE 并重启；替换或启动失败时保留或恢复旧程序。也可以退出后手动覆盖 EXE。业务数据保存在独立目录，不会随 EXE 替换而删除；数据库升级前会备份。设置页保存的自定义提示词会保留，`prompts/defaults` 仅是随版本更新的参考稿。
 
-`0.1.0` 没有内置更新器，首次升级到 `0.2.3` 需手动下载。从 `0.2.1` 开始使用应用内更新；请将 EXE 放在当前用户有写入权限的目录。
+请将 EXE 放在当前用户有写入权限的目录。
 
 版本变化见[更新记录](CHANGELOG.md)，完整交互规则见[产品设计](docs/产品设计.md)。
 
