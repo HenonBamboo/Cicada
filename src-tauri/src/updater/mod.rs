@@ -34,12 +34,32 @@ pub(super) struct Manifest {
     notes: String,
 }
 
-#[derive(Clone, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateView {
     version: String,
     notes: String,
     published_at: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateStatus {
+    #[default]
+    Idle,
+    Checking,
+    UpToDate,
+    Available,
+    Error,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateStatusView {
+    status: UpdateStatus,
+    checked_at: Option<String>,
+    update: Option<UpdateView>,
+    error: Option<String>,
 }
 
 impl From<&Manifest> for UpdateView {
@@ -62,6 +82,8 @@ struct Candidate {
 #[derive(Default)]
 pub struct UpdateState {
     candidate: Mutex<Option<Candidate>>,
+    status: Mutex<UpdateStatusView>,
+    operation: tokio::sync::Mutex<()>,
     installing: AtomicBool,
 }
 
@@ -249,13 +271,7 @@ pub fn startup(app: &AppHandle) {
             }
             let _ = app.emit_to("main", "desktop-error", message);
         }
-        if let Ok(Some(candidate)) = check().await {
-            let view = UpdateView::from(&candidate.manifest);
-            if let Ok(mut slot) = app.state::<UpdateState>().candidate.lock() {
-                *slot = Some(candidate);
-            }
-            let _ = app.emit_to("main", "update-available", view);
-        }
+        let _ = check_now(&app, &app.state::<UpdateState>()).await;
     });
 }
 
@@ -268,6 +284,78 @@ pub fn get(state: &UpdateState) -> AppResult<Option<UpdateView>> {
         .map(|c| UpdateView::from(&c.manifest)))
 }
 
+pub fn get_status(state: &UpdateState) -> AppResult<UpdateStatusView> {
+    state
+        .status
+        .lock()
+        .map(|view| view.clone())
+        .map_err(|_| invalid("更新状态暂时不可用"))
+}
+
+fn publish_status(
+    app: &AppHandle,
+    state: &UpdateState,
+    view: UpdateStatusView,
+) -> AppResult<UpdateStatusView> {
+    *state
+        .status
+        .lock()
+        .map_err(|_| invalid("更新状态暂时不可用"))? = view.clone();
+    let _ = app.emit_to("main", "update-status", &view);
+    Ok(view)
+}
+
+fn completed_status(
+    result: &AppResult<Option<Candidate>>,
+    previous: Option<UpdateView>,
+) -> UpdateStatusView {
+    let (status, update, error) = match result {
+        Ok(Some(candidate)) => (
+            UpdateStatus::Available,
+            Some(UpdateView::from(&candidate.manifest)),
+            None,
+        ),
+        Ok(None) => (UpdateStatus::UpToDate, None, None),
+        Err(error) => (UpdateStatus::Error, previous, Some(error.to_string())),
+    };
+    UpdateStatusView {
+        status,
+        update,
+        error,
+        checked_at: Some(chrono::Utc::now().to_rfc3339()),
+    }
+}
+
+/// 只由本次启动和用户主动检查调用；并发点击复用在途检查，不添加定时或聚焦检查。
+pub async fn check_now(app: &AppHandle, state: &UpdateState) -> AppResult<UpdateStatusView> {
+    let Ok(_operation) = state.operation.try_lock() else {
+        if state.installing.load(Ordering::Acquire) {
+            return Err(invalid("正在更新，请稍候"));
+        }
+        return get_status(state);
+    };
+    let mut checking = get_status(state)?;
+    checking.status = UpdateStatus::Checking;
+    checking.error = None;
+    publish_status(app, state, checking)?;
+    let previous = get(state)?;
+    let result = check().await;
+    let status = completed_status(&result, previous);
+    if let Ok(candidate) = result {
+        let view = candidate
+            .as_ref()
+            .map(|value| UpdateView::from(&value.manifest));
+        *state
+            .candidate
+            .lock()
+            .map_err(|_| invalid("更新状态暂时不可用"))? = candidate;
+        if let Some(view) = view {
+            let _ = app.emit_to("main", "update-available", view);
+        }
+    }
+    publish_status(app, state, status)
+}
+
 struct InstallGuard<'a>(&'a AtomicBool);
 impl Drop for InstallGuard<'_> {
     fn drop(&mut self) {
@@ -276,6 +364,10 @@ impl Drop for InstallGuard<'_> {
 }
 
 pub async fn install(app: &AppHandle, state: &UpdateState) -> AppResult<()> {
+    let _operation = state
+        .operation
+        .try_lock()
+        .map_err(|_| invalid("正在检查或安装更新，请稍候"))?;
     if state.installing.swap(true, Ordering::AcqRel) {
         return Err(invalid("正在准备更新，请稍候"));
     }
@@ -401,5 +493,27 @@ mod tests {
         assert!(verify_download(&path, &manifest).is_err());
         std::fs::write(&path, b"MZok-extra").unwrap();
         assert!(verify_download(&path, &manifest).is_err());
+    }
+
+    #[test]
+    fn 检查结果区分最新可用和失败且保留签名候选() {
+        let (_, bytes, signature) = signed();
+        let candidate = Candidate {
+            manifest: serde_json::from_slice(&bytes).unwrap(),
+            bytes,
+            signature,
+        };
+        let available = completed_status(&Ok(Some(candidate)), None);
+        assert_eq!(available.status, UpdateStatus::Available);
+        assert_eq!(available.update.as_ref().unwrap().version, "0.3.0");
+        assert!(available.checked_at.is_some());
+        let failed = completed_status(&Err(invalid("网络不可用")), available.update);
+        assert_eq!(failed.status, UpdateStatus::Error);
+        assert_eq!(failed.error.as_deref(), Some("网络不可用"));
+        assert!(failed.update.is_some());
+        let latest = completed_status(&Ok(None), failed.update);
+        assert_eq!(latest.status, UpdateStatus::UpToDate);
+        assert!(latest.update.is_none());
+        assert!(latest.error.is_none());
     }
 }

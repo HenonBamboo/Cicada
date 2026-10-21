@@ -14,7 +14,7 @@ export interface Preferences {
     mainShortcut: string;
     stickyShortcut: string;
     autostart: boolean;
-    showStickiesOnStartup: boolean;
+    startupView: "main" | "sticky";
     closeToTray: boolean;
   };
   sticky: { color: string; opacity: number; autoHide: boolean };
@@ -46,6 +46,8 @@ export const previewPrompt = (id: string) =>
   invoke<{ content: string; tools: string }>("preview_prompt", { id });
 export const exportData = (format: "json" | "markdown") =>
   invoke<{ fileName: string; content: string; mimeType: string }>("export_data", { format });
+export const saveExport = (format: "json" | "markdown") =>
+  invoke<string | null>("save_export", { format });
 export const importData = (content: string) =>
   invoke<{ tasks: number; nodes: number; completions: number; recurRules: number }>("import_data", {
     content,

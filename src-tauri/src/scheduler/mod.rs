@@ -8,3 +8,12 @@ mod timer;
 
 pub use inbox::spawn_inbox_worker;
 pub use timer::spawn_automation;
+
+pub struct CopyWake(pub tokio::sync::Notify);
+
+pub fn wake_copy(app: &tauri::AppHandle) {
+    use tauri::Manager;
+    if let Some(wake) = app.try_state::<CopyWake>() {
+        wake.0.notify_one();
+    }
+}

@@ -8,6 +8,24 @@
 }
 
 /* 舞台 */
+.page-stack {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+.page-stack > .stage {
+  height: 100%;
+}
+.settings-host {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  background: var(--bg);
+}
+.settings-host[inert] {
+  pointer-events: none;
+}
 .stage {
   flex: 1;
   min-height: 0;

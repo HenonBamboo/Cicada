@@ -218,7 +218,7 @@ async fn 添加任务_写入并可追溯到请求() {
         .unwrap();
     assert_eq!(r.kind, ReplyKind::Done);
     assert_eq!(r.lead, "知了，已完成以下操作。");
-    assert_eq!(r.items[0].text, "添加「交周报」（明天，15:00 提醒）");
+    assert_eq!(r.items[0].text, "添加「交周报」（计划 2026-10-18，15:00 提醒）");
     assert_eq!(
         env.count("SELECT COUNT(*) FROM tasks WHERE remind_at = '2026-10-18T15:00:00'"),
         1
@@ -259,7 +259,7 @@ async fn 删除先确认_回复确认后执行() {
     let ctx = env.ctx(&c, Some(&m));
     let r = submit(&ctx, input("删掉开会")).await.unwrap();
     assert_eq!(r.kind, ReplyKind::Confirm);
-    assert_eq!(r.items[0].text, "删除「开会」");
+    assert_eq!(r.items[0].text, "删除「开会」（计划 2026-10-17）");
     assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
 
     let r = submit(&ctx, input("确认")).await.unwrap();
@@ -295,6 +295,36 @@ async fn 确认前有变化时重新预览() {
         ReplyKind::Done
     );
     assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+}
+
+#[tokio::test]
+async fn 确认前同编号被复用时保留新任务() {
+    let env = Env::new();
+    let id = env.add_task("旧任务");
+    let c = clock("2026-10-17 10:00:00");
+    let m = scripted_write(
+        "删除旧任务",
+        vec![
+            Step::Tools(vec![("task_delete", json!({"id":id}))]),
+            Step::Say("待确认"),
+        ],
+    );
+    let ctx = env.ctx(&c, Some(&m));
+    let pending = submit(&ctx, input("删除旧任务")).await.unwrap();
+    env.db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM tasks WHERE id=?1", [id])
+        .unwrap();
+    assert_eq!(env.add_task("另一条任务"), id);
+    let error = confirm(&ctx, &pending.request_id).await.unwrap();
+    assert_eq!(error.kind, ReplyKind::Error);
+    assert!(error.lead.contains("已经被替换"));
+    assert_eq!(
+        env.count("SELECT COUNT(*) FROM tasks WHERE title='另一条任务'"),
+        1
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM op_log"), 0);
 }
 
 #[tokio::test]
@@ -381,7 +411,7 @@ async fn 追问后接着处理() {
             Step::Tools(vec![
                 (
                     "intent_checklist",
-                    json!({"items":[{"id":"i1","excerpt":"开会那件做完了","kind":"write"},{"id":"answer","excerpt":"周会","kind":"context"}]}),
+                    json!({"append":true,"items":[{"id":"answer","excerpt":"周会","kind":"context"}]}),
                 ),
                 ("task_query", json!({"keyword":"周会"})),
                 ("task_set_done", json!({"id": a, "done": true})),
@@ -406,6 +436,201 @@ async fn 追问后接着处理() {
     assert!(
         matches!(msgs.last(), Some(Message::ToolResult { content, .. }) if content.contains("周会"))
     );
+}
+
+#[tokio::test]
+async fn 删除遗留同名实例保留今日任务和重复规则() {
+    let env = Env::new();
+    let ids: Vec<_> = (0..3).map(|_| env.add_task("读一篇论文")).collect();
+    {
+        let db = env.db.lock().unwrap();
+        db.execute("INSERT INTO recur_rules (title,kind,start_date,created_at,updated_at) VALUES ('读一篇论文','daily','2026-10-19','x','x')", []).unwrap();
+        for (id, date) in ids.iter().zip(["2026-10-19", "2026-10-20", "2026-10-21"]) {
+            db.execute("UPDATE tasks SET planned_date=?1,remind_at=?1||'T09:00:00',recur_rule_id=1 WHERE id=?2", rusqlite::params![date,id]).unwrap();
+        }
+    }
+    let c = clock("2026-10-21 10:00:00");
+    let m = scripted(vec![
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"del","excerpt":"删掉遗留的两个任务","kind":"write"}]}),
+            ),
+            ("task_query", json!({"scope":"legacy"})),
+            ("task_delete", json!({"id":ids[0],"intent_id":"del"})),
+            ("task_delete", json!({"id":ids[1],"intent_id":"del"})),
+        ]),
+        Step::Say("待确认"),
+    ]);
+    let ctx = env.ctx(&c, Some(&m));
+    let preview = submit(&ctx, input("删掉遗留的两个任务")).await.unwrap();
+    assert_eq!(preview.kind, ReplyKind::Confirm);
+    assert_eq!(preview.items.len(), 2);
+    assert!(preview.items[0].text.contains("2026-10-19，09:00 提醒"));
+    assert!(preview.items[1].text.contains("2026-10-20，09:00 提醒"));
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 3);
+    assert_eq!(
+        confirm(&ctx, &preview.request_id).await.unwrap().kind,
+        ReplyKind::Done
+    );
+    assert_eq!(
+        env.count("SELECT COUNT(*) FROM tasks WHERE planned_date='2026-10-21'"),
+        1
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
+    assert_eq!(
+        env.count("SELECT COUNT(*) FROM recur_rules WHERE active=1"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn 实体选择显示日期并隐藏引用_无需重抄原清单() {
+    let env = Env::new();
+    let a = env.add_task("读一篇论文");
+    let b = env.add_task("读一篇论文");
+    env.db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planned_date='2026-10-16' WHERE id=?1",
+            [a],
+        )
+        .unwrap();
+    let c = clock("2026-10-17 10:00:00");
+    let m = scripted(vec![
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"del","excerpt":"删除一条读论文任务","kind":"write"}]}),
+            ),
+            ("task_query", json!({"keyword":"论文"})),
+            (
+                "ask_clarify",
+                json!({"question":"删除第1条还是第2条？","options":["第1条","第2条"]}),
+            ),
+        ]),
+        Step::Tools(vec![(
+            "ask_clarify",
+            json!({"question":"选择任务","entity_options":[
+                {"targets":[{"kind":"task","id":a.to_string()}]},
+                {"targets":[{"kind":"task","id":b.to_string()}]}
+            ]}),
+        )]),
+        Step::Tools(vec![
+            ("task_query", json!({"scope":"legacy"})),
+            ("task_delete", json!({"id":a,"intent_id":"del"})),
+        ]),
+        Step::Say("待确认"),
+    ]);
+    let ctx = env.ctx(&c, Some(&m));
+    let first = submit(&ctx, input("删除一条读论文任务")).await.unwrap();
+    assert_eq!(first.kind, ReplyKind::Clarify);
+    assert!(first.options.is_empty());
+    assert_eq!(first.entity_options.len(), 2);
+    assert!(first.entity_options[0].label.contains("2026-10-16"));
+    assert!(first.entity_options[1].label.contains("2026-10-17"));
+    assert_eq!(
+        process(&ctx, &first.request_id)
+            .await
+            .unwrap()
+            .entity_options,
+        first.entity_options
+    );
+    assert!(
+        respond_selection(&ctx, &first.request_id, "not-current")
+            .await
+            .is_err()
+    );
+    env.db
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET reminded_at='2026-10-17T10:00:00' WHERE id=?1",
+            [a],
+        )
+        .unwrap();
+    let token = &first.entity_options[0].value;
+    let preview = respond_selection(&ctx, &first.request_id, token)
+        .await
+        .unwrap();
+    assert_eq!(preview.kind, ReplyKind::Confirm);
+    assert!(
+        respond_selection(&ctx, &first.request_id, token)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        confirm(&ctx, &first.request_id).await.unwrap().kind,
+        ReplyKind::Done
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
+    let saved = ctx.svc(|s| s.inbox_get(&first.request_id)).unwrap();
+    assert!(!saved.content.contains(token));
+    assert!(!saved.result_summary.unwrap().contains(token));
+    for (_, messages) in seen(&m) {
+        assert!(!serde_json::to_string(&messages).unwrap().contains(token));
+    }
+}
+
+#[tokio::test]
+async fn 选择前同编号被复用时拒绝且不写入() {
+    let env = Env::new();
+    let id = env.add_task("旧任务");
+    let c = clock("2026-10-17 10:00:00");
+    let m = scripted(vec![Step::Tools(vec![
+        ("task_query", json!({})),
+        (
+            "ask_clarify",
+            json!({"question":"选择任务","entity_options":[{"targets":[{"kind":"task","id":id}]}]}),
+        ),
+    ])]);
+    let ctx = env.ctx(&c, Some(&m));
+    let reply = submit(&ctx, input("删除旧任务吗")).await.unwrap();
+    env.db
+        .lock()
+        .unwrap()
+        .execute("DELETE FROM tasks WHERE id=?1", [id])
+        .unwrap();
+    assert_eq!(env.add_task("另一条任务"), id);
+    let error = respond_selection(&ctx, &reply.request_id, &reply.entity_options[0].value)
+        .await
+        .unwrap();
+    assert_eq!(error.kind, ReplyKind::Error);
+    assert!(error.lead.contains("已经变化"));
+    assert_eq!(seen(&m).len(), 1, "过期目标不再发给模型");
+    assert_eq!(
+        env.count("SELECT COUNT(*) FROM tasks WHERE title='另一条任务'"),
+        1
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM op_log"), 0);
+}
+
+#[tokio::test]
+async fn 重复相同工具失败提前结束且不提交部分计划() {
+    let env = Env::new();
+    let c = clock("2026-10-17 10:00:00");
+    let bad = || Step::Tools(vec![("task_delete", json!({"id":404,"intent_id":"del"}))]);
+    let m = scripted(vec![
+        Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"add","excerpt":"买菜","kind":"write"},{"id":"del","excerpt":"删除不存在的任务","kind":"write"}]}),
+            ),
+            ("task_add", json!({"title":"买菜","intent_id":"add"})),
+        ]),
+        bad(),
+        bad(),
+        bad(),
+    ]);
+    let reply = submit(&env.ctx(&c, Some(&m)), input("- 买菜\n- 删除不存在的任务"))
+        .await
+        .unwrap();
+    assert_eq!(reply.kind, ReplyKind::Error);
+    assert!(reply.lead.contains("没有执行任何改动"));
+    assert!(!reply.lead.contains("拆开"));
+    assert_eq!(seen(&m).len(), 4);
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
 }
 
 #[tokio::test]

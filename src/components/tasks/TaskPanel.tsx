@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { relativeDay, remindLabel } from "../../lib/dates";
 import type { TaskBoard, TaskView } from "../../lib/types";
 import { taskKey } from "../../lib/useBoard";
-import { MarkdownBlock, MarkdownInline, markdownToPlainText } from "../../lib/markdown";
+import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import { useUiCopy } from "../../lib/useUiCopy";
 import { itemDescription } from "../../lib/nodePresentation";
 import { Check } from "../Check";
@@ -51,14 +51,6 @@ function Meta({ t, today, legacy }: { t: TaskView; today: string; legacy?: boole
       <span key="recur" className="chip">
         <Icon name="repeat" />
         {t.recur}
-      </span>,
-    );
-  }
-  if (t.link) {
-    chips.push(
-      <span key="link" className="chip accent">
-        <Icon name="link" />
-        {t.link.path}
       </span>,
     );
   }
@@ -129,11 +121,6 @@ function TaskRow({
           <MarkdownInline text={t.title} />
         </div>
         <Meta t={t} today={today} legacy={legacy} />
-        {t.note && (
-          <div className="task-note">
-            <MarkdownBlock text={t.note} />
-          </div>
-        )}
       </div>
     </motion.div>
   );
@@ -156,11 +143,6 @@ function UpcomingRow({ t, today, flash }: { t: TaskView; today: string; flash: b
           <MarkdownInline text={t.title} />
         </div>
         <Meta t={t} today={today} />
-        {t.note && (
-          <div className="task-note">
-            <MarkdownBlock text={t.note} />
-          </div>
-        )}
       </div>
     </motion.div>
   );

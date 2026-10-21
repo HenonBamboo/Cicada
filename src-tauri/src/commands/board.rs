@@ -1,7 +1,7 @@
 //! 主界面：启动信息、看板数据、勾选、撤销、外观
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use super::{EVENT_INBOX_CHANGED, glass_supported, notify_changes, poisoned, with_service};
 use crate::agent::AgentReply;
@@ -207,6 +207,15 @@ pub fn set_appearance(
 pub fn window_ready(window: tauri::WebviewWindow) -> AppResult<()> {
     if window.label() == "main" {
         crate::updater::mark_ready();
+        if !window
+            .state::<AppState>()
+            .config
+            .lock()
+            .map_err(super::poisoned)?
+            .show_main_on_startup()
+        {
+            return Ok(());
+        }
     }
     crate::desktop::memory::show(&window)
         .and_then(|_| window.set_focus())

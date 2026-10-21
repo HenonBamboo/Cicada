@@ -16,12 +16,13 @@ import {
   type StickyState,
 } from "../../lib/desktop";
 import { monthDay, timeOf } from "../../lib/dates";
-import { isModeShortcut } from "../../lib/keys";
+import { canAdoptExample, isModeShortcut } from "../../lib/keys";
 import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import type { ProjectNode, TaskView } from "../../lib/types";
 import { useCapture } from "../../lib/useCapture";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
 import { useUiCopy } from "../../lib/useUiCopy";
+import { useInputExample } from "../../lib/useInputExample";
 import { nodeDeadline, itemDescription } from "../../lib/nodePresentation";
 import "./sticky.css";
 
@@ -100,6 +101,11 @@ export function StickyWindow() {
   const flashTimer = useRef<number | undefined>(undefined);
   const capture = useCapture("sticky");
   const copy = useUiCopy();
+  const example = useInputExample(
+    copy,
+    capture.mode,
+    capture.busy || !!capture.text.length || !!capture.images.length,
+  );
   const setCaptureMode = capture.setMode;
   const defaultModeApplied = useRef(false);
   const input = useRef<HTMLInputElement>(null);
@@ -313,7 +319,7 @@ export function StickyWindow() {
             <button
               type="button"
               className="st-mode"
-              title="Tab 切换任务/项目"
+              title="Ctrl+Tab 切换任务/项目"
               aria-label={`当前${capture.mode === "task" ? "任务" : "项目"}模式，点击切换`}
               disabled={capture.busy}
               onClick={() => {
@@ -326,8 +332,8 @@ export function StickyWindow() {
             <input
               ref={input}
               aria-label={capture.mode === "task" ? "记录任务" : "记录项目"}
-              title="Tab 切换任务/项目"
-              placeholder={capture.mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
+              title="Ctrl+Tab 切换任务/项目"
+              placeholder={example.placeholder}
               value={capture.text}
               disabled={capture.busy}
               maxLength={20_000}
@@ -338,6 +344,17 @@ export function StickyWindow() {
                 if (isModeShortcut(event)) {
                   event.preventDefault();
                   capture.setMode(capture.mode === "task" ? "project" : "task");
+                } else if (
+                  canAdoptExample(
+                    event,
+                    capture.text,
+                    capture.images.length,
+                    capture.busy,
+                    example.example,
+                  )
+                ) {
+                  event.preventDefault();
+                  capture.setText(example.example);
                 } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   void capture.send();

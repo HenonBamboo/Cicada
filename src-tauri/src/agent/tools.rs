@@ -19,6 +19,7 @@ pub enum Outcome {
     Clarify {
         question: String,
         options: Vec<String>,
+        entity_options: Vec<super::clarify::PendingOption>,
     },
 }
 
@@ -44,7 +45,7 @@ fn id_schema() -> Value {
     // 部分服务商不支持 anyOf，统一声明为字符串；解析时整数也接受
     json!({
         "type": "string",
-        "description": "任务编号（task_query 返回的 id，如 \"12\"），或本次新建任务的引用，如 \"$1\" 表示本次第 1 条 task_add"
+        "description": "工具内部定位标识（task_query 返回的 id），或本次新建任务的 $1 等引用；不能作为用户可见的名称或序号"
     })
 }
 
@@ -93,8 +94,9 @@ pub fn specs() -> Vec<ToolSpec> {
         ),
         spec(
             "task_query",
-            "查询任务，返回编号、标题、计划日期、状态等。修改或删除前用它找到准确的编号。",
+            "查询任务，返回内部id、display_label、计划日期及状态；回复与选择使用display_label，id只供写工具定位。删除前先按用户指定分区和条件查询。",
             json!({
+                "scope": { "type": "string", "enum": ["all", "today", "legacy", "upcoming"], "description": "默认 all；today 今日未完成、legacy 遗留未完成（计划日期早于业务今天）、upcoming 之后未完成。遗留是完整集合，不包含今日任务。" },
                 "status": { "type": "string", "enum": ["open", "done", "all"], "description": "默认 all" },
                 "date_from": { "type": "string", "description": format!("{DATE_HINT}；已完成的按完成日期筛选") },
                 "date_to": { "type": "string", "description": DATE_HINT },
@@ -126,7 +128,12 @@ pub fn specs() -> Vec<ToolSpec> {
             "向用户追问。匹配到多条或信息不全时使用，不要猜。调用后本轮结束，等用户回答。",
             json!({
                 "question": { "type": "string", "description": "简短的问题" },
-                "options": { "type": "array", "items": { "type": "string" }, "description": "可选的回答，最多 5 个" }
+                "options": { "type": "array", "items": { "type": "string" }, "description": "非实体的普通回答选项，最多5个；不能用内部编号指代任务或节点" },
+                "entity_options": { "type": "array", "maxItems": 5, "description": "选择任务/节点时使用，程序按当前查询结果生成名称、日期等可读标签，不能用裸编号让用户选择", "items": {"type":"object","properties":{
+                    "targets":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"object","properties":{
+                        "kind":{"type":"string","enum":["task","node"]},"id":{"type":"string","description":"本轮查询返回的内部定位标识，只供程序使用"}
+                    },"required":["kind","id"],"additionalProperties":false}}
+                },"required":["targets"],"additionalProperties":false} }
             }),
             &["question"],
         ),
@@ -195,7 +202,7 @@ pub fn handle_mode(
 ) -> Outcome {
     if !specs_for(mode).iter().any(|t| t.name == call.name) {
         return Outcome::Error(format!(
-            "当前模式不能使用 {}，请提示用户用 Tab 切换到{}模式。",
+            "当前模式不能使用 {}，请提示用户用 Ctrl+Tab 切换到{}模式。",
             call.name,
             if mode == "project" {
                 "任务"
@@ -322,6 +329,7 @@ pub fn handle_at(
     match call.name.as_str() {
         "task_query" => {
             let f = TaskFilter {
+                scope: s(args, "scope"),
                 status: s(args, "status"),
                 date_from: s(args, "date_from"),
                 date_to: s(args, "date_to"),
@@ -360,7 +368,11 @@ pub fn handle_at(
                         .collect()
                 })
                 .unwrap_or_default();
-            Outcome::Clarify { question, options }
+            Outcome::Clarify {
+                question,
+                options,
+                entity_options: vec![],
+            }
         }
         name => {
             let change = match to_change(name, args, today) {

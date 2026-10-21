@@ -77,6 +77,7 @@ pub fn run() {
             desktop::focus_main(app);
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(
             tauri_plugin_autostart::Builder::new()
@@ -91,6 +92,11 @@ pub fn run() {
             // Windows 上 data_dir 即 %APPDATA%（Roaming）
             let state = AppState::system(&app.path().data_dir()?)?;
             let theme = state.config.lock().map(|c| c.appearance.theme).ok();
+            let show_main = state
+                .config
+                .lock()
+                .map(|c| c.show_main_on_startup())
+                .unwrap_or(true);
             if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
                 if let Some(theme) = theme {
                     let supported = vibrancy::probe(&win, theme);
@@ -98,7 +104,7 @@ pub fn run() {
                 }
                 std::thread::spawn(move || {
                     std::thread::sleep(SHOW_FALLBACK);
-                    if !win.is_visible().unwrap_or(true) {
+                    if show_main && !win.is_visible().unwrap_or(true) {
                         let _ = desktop::memory::show(&win);
                     }
                 });
@@ -152,6 +158,7 @@ pub fn run() {
                 prompt_settings::preview_prompt,
                 prompt_settings::suggest_prompt,
                 data::export_data,
+                data::save_export,
                 data::import_data,
                 data::list_operation_log,
                 settings::save_model_settings,
@@ -164,6 +171,8 @@ pub fn run() {
                 automation::get_greeting,
                 automation::get_ui_copy,
                 update::get_update,
+                update::get_update_status,
+                update::check_update,
                 update::install_update,
                 automation::list_reports,
                 automation::read_report,

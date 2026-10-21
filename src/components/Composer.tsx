@@ -6,8 +6,9 @@ import {
   type ClipboardEvent,
   type KeyboardEvent,
 } from "react";
-import { isModeShortcut } from "../lib/keys";
+import { canAdoptExample, isModeShortcut } from "../lib/keys";
 import { useInputHistory } from "../lib/useInputHistory";
+import { useInputExample } from "../lib/useInputExample";
 import { useUiCopy } from "../lib/useUiCopy";
 import type { Mode } from "../lib/types";
 import { Icon } from "./Icon";
@@ -43,10 +44,16 @@ export function Composer({
   const [text, setText] = useState("");
   const [images, setImages] = useState<string[]>([]);
   const [inputError, setInputError] = useState("");
+  const [loadingImages, setLoadingImages] = useState(0);
   const input = useRef<HTMLTextAreaElement>(null);
   const file = useRef<HTMLInputElement>(null);
   const history = useInputHistory(mode, "main");
   const copy = useUiCopy();
+  const example = useInputExample(
+    copy,
+    mode,
+    busy || !!text.length || !!images.length || !!loadingImages,
+  );
 
   useEffect(() => {
     if (focusRequest > 0) input.current?.focus();
@@ -60,7 +67,7 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, MAX_HEIGHT)}px`;
   }, [text]);
 
-  const canSend = !busy && (text.trim().length > 0 || images.length > 0);
+  const canSend = !busy && !loadingImages && (text.trim().length > 0 || images.length > 0);
 
   const send = async () => {
     if (!canSend) return;
@@ -99,8 +106,10 @@ export function Composer({
     }
     for (const f of accepted) {
       const r = new FileReader();
+      setLoadingImages((count) => count + 1);
       r.onload = () => setImages((list) => [...list, String(r.result)]);
       r.onerror = () => setInputError("图片读取失败，请重新选择");
+      r.onloadend = () => setLoadingImages((count) => count - 1);
       r.readAsDataURL(f);
     }
   };
@@ -114,6 +123,10 @@ export function Composer({
     } else if (isModeShortcut(e)) {
       e.preventDefault();
       onModeChange(mode === "task" ? "project" : "task");
+    } else if (canAdoptExample(e, text, images.length, busy || !!loadingImages, example.example)) {
+      e.preventDefault();
+      history.reset();
+      setText(example.example);
     }
   };
 
@@ -145,7 +158,7 @@ export function Composer({
             </button>
           ))}
         </div>
-        <span className="hint">Tab 切换</span>
+        <span className="hint">Ctrl+Tab 切换</span>
       </div>
 
       {images.length > 0 && (
@@ -172,7 +185,7 @@ export function Composer({
         value={text}
         maxLength={MAX_TEXT_LENGTH}
         disabled={busy}
-        placeholder={mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
+        placeholder={example.placeholder}
         aria-label="输入框"
         onChange={(e) => {
           history.reset();

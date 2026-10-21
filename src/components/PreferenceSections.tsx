@@ -222,13 +222,6 @@ export function PreferenceSections({
               onChange={(autoHide) => sticky({ autoHide })}
             />
           </Row>
-          <Row label="启动时显示便利贴">
-            <Switch
-              label="启动时显示便利贴"
-              value={value.desktop.showStickiesOnStartup}
-              onChange={(showStickiesOnStartup) => desktop({ showStickiesOnStartup })}
-            />
-          </Row>
         </div>
       </section>
       <section id="keys">
@@ -257,6 +250,16 @@ export function PreferenceSections({
       <section id="startup">
         <h2>启动</h2>
         <div className="card settings-group">
+          <Row label="启动界面" hint="下次启动时只显示所选界面">
+            <Seg
+              value={value.desktop.startupView}
+              choices={[
+                ["main", "主界面"],
+                ["sticky", "便利贴"],
+              ]}
+              onChange={(startupView) => desktop({ startupView })}
+            />
+          </Row>
           <Row label="开机自动启动">
             <Switch
               label="开机自动启动"

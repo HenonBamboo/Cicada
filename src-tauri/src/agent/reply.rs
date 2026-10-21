@@ -5,6 +5,13 @@ use serde::Serialize;
 use crate::service::ChangeSet;
 use crate::service::changes::PreviewItem;
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EntityOption {
+    pub label: String,
+    /// 一次性选择值；只能随 selectionToken 提交，不能作为正文或历史记录。
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReplyKind {
@@ -33,6 +40,7 @@ pub struct AgentReply {
     pub items: Vec<PreviewItem>,
     /// 追问的可选回答
     pub options: Vec<String>,
+    pub entity_options: Vec<EntityOption>,
     pub changes: ChangeSet,
 }
 
@@ -45,6 +53,7 @@ impl AgentReply {
             lead,
             items: vec![],
             options: vec![],
+            entity_options: vec![],
             changes: ChangeSet::default(),
         }
     }

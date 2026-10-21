@@ -8,7 +8,7 @@
 一个安静地待在 Windows 桌面的个人任务与项目助手。<br>
 用自然语言记事、安排任务、推进项目和回顾完成情况，不必反复打开表单整理字段。
 
-[![Version](https://img.shields.io/badge/version-0.2.2-287f73?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.3-287f73?style=flat-square)](CHANGELOG.md)
 [![Windows 11](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square&logo=windows11)](#下载与使用)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--only-1f4733?style=flat-square)](LICENSE)
@@ -37,7 +37,7 @@
 
 ### 只说不点
 
-除了勾选今日任务，任务和项目的新增、修改、查询、移动与删除都从同一个输入框发起。按 `Tab` 即可在任务和项目模式之间切换。
+除了勾选今日任务，任务和项目的新增、修改、查询、移动与删除都从同一个输入框发起。按 `Ctrl+Tab` 切换任务和项目模式，空输入框按 `Tab` 可采用当前示例，确认内容后再发送。
 
 可以直接粘贴 Markdown 列表；原文保存在本机。近 24 小时最近 6 轮对话共享上下文，继续说“把刚才那个改到明天”即可关联前文；真正修改前仍会查询当前数据。
 
@@ -63,9 +63,9 @@
 
 ## 下载与使用
 
-知了 `0.2.2` 面向 **Windows 11 x64**，采用无需安装的直接运行 EXE。
+知了 `0.2.3` 提供 **Windows 11 x64** 无需安装的直接运行 EXE。
 
-从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.2-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
+从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.3-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
 
 运行前请确认系统已安装 Microsoft Edge WebView2 Runtime。当前 EXE 没有 Windows 代码签名，首次启动时可能显示来源提示；请从上述 Releases 下载并核对同版本的 `SHA256SUMS`。应用内更新另有独立的签名校验。
 
@@ -84,7 +84,8 @@ Base URL 支持 HTTP 和 HTTPS。HTTP 会明文传输请求内容和 API Key，�
 | 快速记录            | `Ctrl+Alt+Space`                    |
 | 显示 / 隐藏主窗口   | `Ctrl+Alt+Z`                        |
 | 显示 / 隐藏便利贴   | `Ctrl+Alt+S`                        |
-| 切换任务 / 项目模式 | `Tab`                               |
+| 采用输入示例        | 空输入框按 `Tab`，填入后需发送      |
+| 切换任务 / 项目模式 | `Ctrl+Tab`                          |
 | 发送 / 换行         | `Enter` / `Shift+Enter`             |
 | 浏览之前的输入      | `↑` / `↓`；多行内容仅在首尾边界生效 |
 
@@ -107,9 +108,9 @@ Cicada/
 
 使用 AI 功能时，知了只向你选择的模型服务发送完成本次请求所需的文字、查询结果或图片，不会上传整个数据库。完整的数据范围、保留规则和凭据处理方式见[隐私说明](PRIVACY.md)。
 
-程序启动后会在后台检查 GitCode 新版。确认更新后，程序验证清单签名、文件大小和 SHA-256，再替换原路径 EXE 并重启；替换或启动失败时保留或恢复旧程序。也可以退出后手动覆盖 EXE。业务数据保存在独立目录，不会随 EXE 替换而删除；数据库升级前会备份。
+程序每次启动后在后台检查一次 GitCode 新版，也可在“设置 → 关于”手动检查和更新，不进行定时检查。确认更新后，程序验证清单签名、文件大小和 SHA-256，再替换原路径 EXE 并重启；替换或启动失败时保留或恢复旧程序。也可以退出后手动覆盖 EXE。业务数据保存在独立目录，不会随 EXE 替换而删除；数据库升级前会备份。设置页保存的自定义提示词会保留，`prompts/defaults` 仅是随版本更新的参考稿。
 
-`0.1.0` 没有内置更新器，首次升级到 `0.2.2` 需手动下载。从 `0.2.1` 开始使用应用内更新；请将 EXE 放在当前用户有写入权限的目录。
+`0.1.0` 没有内置更新器，首次升级到 `0.2.3` 需手动下载。从 `0.2.1` 开始使用应用内更新；请将 EXE 放在当前用户有写入权限的目录。
 
 版本变化见[更新记录](CHANGELOG.md)，完整交互规则见[产品设计](docs/产品设计.md)。
 

@@ -2,12 +2,16 @@ import { useEffect, useState, type ReactNode } from "react";
 import {
   clearApiKey,
   createBackup,
+  checkUpdate,
+  getUpdateStatus,
   getModelSettings,
   listBackups,
   openFolder,
+  onUpdateStatus,
   restoreBackup,
   saveModelSettings,
   testModel,
+  type UpdateStatusView,
 } from "../lib/commands";
 import type { BackupEntry, Endpoint, ModelSettings, Provider } from "../lib/types";
 import "./settings.css";
@@ -134,11 +138,17 @@ export function Settings({
   onBack,
   onModelSaved,
   onboarding = false,
+  onInstallUpdate,
+  updating = false,
+  updateError = null,
 }: {
   dataDir: string;
   onBack: () => void;
   onModelSaved?: () => void;
   onboarding?: boolean;
+  onInstallUpdate?: () => void;
+  updating?: boolean;
+  updateError?: string | null;
 }) {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [appearance, setLook] = useState<Appearance | null>(null);
@@ -152,6 +162,54 @@ export function Settings({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [promptRevision, setPromptRevision] = useState(0);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatusView | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  useEffect(() => {
+    let alive = true;
+    let received = false;
+    const off = onUpdateStatus((value) => {
+      received = true;
+      if (alive) setUpdateStatus(value);
+    });
+    void getUpdateStatus()
+      .then((value) => {
+        if (alive && !received) setUpdateStatus(value);
+      })
+      .catch((error) => {
+        if (alive) setCheckError(String(error));
+      });
+    return () => {
+      alive = false;
+      void off.then((stop) => stop());
+    };
+  }, []);
+  const checkForUpdate = async () => {
+    if (checkingUpdate || updating) return;
+    setCheckingUpdate(true);
+    setCheckError("");
+    try {
+      setUpdateStatus(await checkUpdate());
+    } catch (error) {
+      setCheckError(String(error));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+  const updateHint =
+    updateError ||
+    checkError ||
+    (updating
+      ? "正在下载并验证更新，完成后会重新启动。"
+      : updateStatus?.status === "checking" || checkingUpdate
+        ? "正在检查更新…"
+        : updateStatus?.status === "error"
+          ? updateStatus.error || "检查更新失败，请重试。"
+          : updateStatus?.update
+            ? `发现新版本 ${updateStatus.update.version}`
+            : updateStatus?.status === "upToDate"
+              ? "当前已是最新版本。"
+              : "启动时会在后台检查更新，也可以手动检查。");
   const load = () =>
     Promise.all([
       getModelSettings().then(setModel),
@@ -477,6 +535,37 @@ export function Settings({
               <Row label="知了" hint={`版本 ${packageInfo.version} · 你只管说，它来整理`}>
                 <span className="settings-note">许可证：AGPL-3.0-only</span>
               </Row>
+              <Row label="程序更新" hint={updateHint}>
+                <div className="reply-actions">
+                  <button
+                    className="btn"
+                    disabled={checkingUpdate || updateStatus?.status === "checking" || updating}
+                    onClick={() => void checkForUpdate()}
+                  >
+                    {checkingUpdate || updateStatus?.status === "checking" ? "检查中…" : "检查更新"}
+                  </button>
+                  {updateStatus?.update && (
+                    <button
+                      className="btn primary"
+                      disabled={
+                        updating ||
+                        checkingUpdate ||
+                        updateStatus.status === "checking" ||
+                        !onInstallUpdate
+                      }
+                      onClick={onInstallUpdate}
+                    >
+                      {updating ? "正在更新" : "更新并重启"}
+                    </button>
+                  )}
+                </div>
+              </Row>
+              {updateStatus?.checkedAt && (
+                <p className="settings-note">
+                  上次检查：
+                  {new Date(updateStatus.checkedAt).toLocaleString("zh-CN", { hour12: false })}
+                </p>
+              )}
             </div>
           </section>
         </div>

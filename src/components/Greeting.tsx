@@ -26,24 +26,24 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
   return (
     <>
       <h1 className="greeting">
-        {copy.generated && copy.greeting ? (
+        {copy.greeting ? (
           copy.greeting
         ) : (
           <>
             {period(hour)}，
             {left ? (
               <>
-                今天还剩 <em>{left}</em> 件事
+                还有 <em>{left}</em> 件事，咱们一件件来。
               </>
             ) : (
-              "今天的事都办完了"
+              "今天的待办清单很清爽。"
             )}
           </>
         )}
       </h1>
       <p className="greeting-sub">
         {day}
-        {copy.generated && copy.nudge ? (
+        {copy.nudge ? (
           <>
             {" "}
             · <span className="nudge">{copy.nudge}</span>
@@ -51,13 +51,9 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
         ) : stale ? (
           <>
             {" · "}
-            <span className="nudge">
-              「{stale.title}」已经拖了 {stale.delayDays} 天，还要做吗？
-            </span>
+            <span className="nudge">「{stale.title}」还在清单里，要继续留着吗？</span>
           </>
-        ) : left ? null : (
-          " · 好好休息"
-        )}
+        ) : null}
       </p>
     </>
   );

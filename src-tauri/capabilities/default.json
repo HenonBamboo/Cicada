@@ -35,6 +35,7 @@
     "allow-reset-prompt",
     "allow-preview-prompt",
     "allow-export-data",
+    "allow-save-export",
     "allow-import-data",
     "allow-list-operation-log",
     "allow-save-model-settings",
@@ -62,6 +63,8 @@
     "allow-get-ui-copy",
     "allow-suggest-prompt",
     "allow-get-update",
+    "allow-get-update-status",
+    "allow-check-update",
     "allow-install-update"
   ]
 }

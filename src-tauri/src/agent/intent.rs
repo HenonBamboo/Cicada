@@ -1,5 +1,5 @@
 //! 模型声明意图，程序核对原文覆盖和写操作归属；未处理完整前不允许部分提交。
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -15,6 +15,9 @@ pub(super) const INSTRUCTIONS: &str = r#"
 - task_query/project_query/recur_query 返回的当前对象才可用于写入。历史内容和历史编号仅供指代理解，不能直接当作写入依据。项目查询中 nodes 包含上下文，matchedIds 才是直接命中项。
 - 每个 Markdown 列表项、标题层次、日期、提醒、备注和条件都要保留。title 使用纯文本；详细说明、清单、链接放入 note 并保留 Markdown。连续动作中的对象和目的不能随意拆开，例如“联系崔所长进行调度对接”是一个节点。
 - 有遗漏或匹配歧义时先补齐工具调用或 ask_clarify。全部写入会统一提交；不要在工具成功前声称已经执行。回复使用名称和项目路径，不向用户报内部 id 或 $ 引用。
+- “今日”“遗留”“之后”分别用 task_query(scope=today/legacy/upcoming)，它们都是未完成任务分区；遗留的计划日期严格早于业务今天，不含今天。用户已明确集合且查询数量相符时直接处理该集合，删除确认由程序负责，不要再让用户从全部未完成任务中选择。
+- 查询回复使用任务的 display_label（标题、计划日期及提醒时间），节点使用项目路径。不能写“第4条”“编号6”等内部定位。实体有歧义时 ask_clarify 用 entity_options.targets（kind=task/node、id=当前查询标识），由程序生成可读选项；普通 options 只用于日期等非实体问题。
+- 追问后的自由文本回答也是本轮新增原文。使用 intent_checklist(append=true) 只追加回答中的要求或 context，不要反复重抄已保存的清单；新增独立要求仍必须列为 write/query，不能伪装为 context。程序已登记的实体选择 context 无需重复登记。回答后仍须查询当前状态，再关联原有 write 意图执行。
 "#;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -43,6 +46,22 @@ pub(super) struct ReadScope {
     nodes: HashSet<i64>,
     rules: HashSet<i64>,
     any_query: bool,
+    #[serde(default)]
+    rows: HashMap<String, Value>,
+    #[serde(default)]
+    selected: Vec<super::clarify::Target>,
+}
+
+/// 同一个校验错误反复出现时及时止损；不把模型协议失败归咎于用户操作过多。
+#[derive(Default)]
+pub(super) struct FailureTracker(HashMap<String, usize>);
+
+impl FailureTracker {
+    pub(super) fn repeated(&mut self, failure: &str) -> bool {
+        let count = self.0.entry(failure.to_string()).or_default();
+        *count += 1;
+        *count >= 3
+    }
 }
 
 pub(super) fn is_write(name: &str) -> bool {
@@ -79,6 +98,7 @@ pub(super) fn specs(mut specs: Vec<ToolSpec>) -> Vec<ToolSpec> {
         }
     }
     specs.push(super::tools::spec("intent_checklist", "写入前一次列全当前输入的全部意图和原文片段，程序验证覆盖后才可写入。", json!({
+        "append":{"type":"boolean","description":"追问后为 true，只补新增回答的意图，保留原有清单和处理状态；默认 false 完整声明"},
         "items":{"type":"array","items":{"type":"object","properties":{
             "id":{"type":"string"},"excerpt":{"type":"string","description":"当前输入中的连续原文片段，逐字保留"},
             "kind":{"type":"string","enum":["write","query","context","unsupported"]}
@@ -108,6 +128,19 @@ impl IntentChecklist {
                 .unwrap_or(Value::Null),
         )
         .map_err(|_| "items 需要包含 id、excerpt、kind 的数组".to_string())?;
+        if args.and_then(|a| a.get("append")).and_then(Value::as_bool) == Some(true) {
+            let mut combined = self.items.clone();
+            for item in items {
+                if let Some(old) = combined.iter().find(|old| old.id == item.id) {
+                    if old.excerpt != item.excerpt || old.kind != item.kind {
+                        return Err("追加意图不能改写已登记项；请为新增回答使用新的意图标识".into());
+                    }
+                } else {
+                    combined.push(item);
+                }
+            }
+            items = combined;
+        }
         if items.is_empty() || items.len() > 80 {
             return Err("请列出 1 到 80 项独立意图".into());
         }
@@ -162,6 +195,17 @@ impl IntentChecklist {
             self.operation_intents.clear();
         }
         Ok("意图清单已登记。按项查询和处理，未处理完不会提交任何改动。".into())
+    }
+
+    /// 只供经过一次性选项校验的实体选择调用；普通文本不能跳过原文覆盖。
+    pub(super) fn selection_context(&mut self, label: &str) {
+        self.items.push(IntentItem {
+            id: format!("s-{}", uuid::Uuid::new_v4().simple()),
+            excerpt: label.to_string(),
+            kind: "context".into(),
+            handled: true,
+            resolution: None,
+        });
     }
 
     pub(super) fn prepare(
@@ -312,6 +356,41 @@ fn missing_source(items: &[IntentItem], source: &str) -> String {
 }
 
 impl ReadScope {
+    pub(super) fn row(&self, kind: &str, id: i64) -> Option<&Value> {
+        self.rows.get(&format!("{kind}:{id}"))
+    }
+
+    pub(super) fn has_internal_reference(&self, text: &str) -> bool {
+        let mut visible = text.to_string();
+        for title in self
+            .rows
+            .values()
+            .filter_map(|row| row.get("title").and_then(Value::as_str))
+        {
+            if super::clarify::has_internal_reference(title) {
+                visible = visible.replace(title, "「已查询的名称」");
+            }
+        }
+        super::clarify::has_internal_reference(&visible)
+    }
+
+    pub(super) fn restart(mut self) -> Self {
+        self.tasks.clear();
+        self.nodes.clear();
+        self.rules.clear();
+        self.rows.clear();
+        self.any_query = false;
+        self
+    }
+
+    pub(super) fn select(&mut self, targets: &[super::clarify::Target]) {
+        for target in targets {
+            if !self.selected.contains(target) {
+                self.selected.push(target.clone());
+            }
+        }
+    }
+
     pub(super) fn observe(&mut self, name: &str, content: &str) {
         if !matches!(
             name,
@@ -337,6 +416,33 @@ impl ReadScope {
                 rows.iter()
                     .filter_map(|row| row.get("id").and_then(Value::as_i64)),
             );
+            let kind = if name == "task_query" {
+                "task"
+            } else if name == "project_query" {
+                "node"
+            } else {
+                "rule"
+            };
+            for row in rows {
+                if let Some(id) = row.get("id").and_then(Value::as_i64) {
+                    // 只保留生成实体选项所需的定位信息，不重复暂存大段备注和子树内容。
+                    let metadata = [
+                        "id",
+                        "title",
+                        "version",
+                        "display_label",
+                        "created_at",
+                        "createdAt",
+                        "parentId",
+                        "dueAt",
+                    ]
+                    .into_iter()
+                    .filter_map(|key| row.get(key).map(|value| (key.to_string(), value.clone())))
+                    .collect::<serde_json::Map<_, _>>();
+                    self.rows
+                        .insert(format!("{kind}:{id}"), Value::Object(metadata));
+                }
+            }
         }
     }
 
@@ -369,6 +475,23 @@ impl ReadScope {
                         "{key} 尚未由本轮 {query} 查证，请重新查询当前数据，不能使用历史编号或猜测编号。"
                     ));
                 }
+                if *key == "id" {
+                    let kind = if query == "task_query" {
+                        "task"
+                    } else if query == "project_query" {
+                        "node"
+                    } else {
+                        "rule"
+                    };
+                    if self.selected.iter().any(|target| target.kind == kind)
+                        && !self
+                            .selected
+                            .iter()
+                            .any(|target| target.kind == kind && Some(target.id) == id)
+                    {
+                        return Err("该内容不在用户刚刚选择的范围内，请只处理已选内容".into());
+                    }
+                }
             }
         }
         Ok(())
@@ -378,6 +501,23 @@ impl ReadScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 定位表达不误伤真实任务名称() {
+        assert!(!super::super::clarify::has_internal_reference(
+            "第4阶段评审、合同#2026、下个月第4个工作日"
+        ));
+        assert!(super::super::clarify::has_internal_reference(
+            "第4、5、6条任务、任务#12、id=8"
+        ));
+        let mut reads = ReadScope::default();
+        reads.observe(
+            "task_query",
+            r#"[{"id":1,"title":"第4项评审"},{"id":2,"title":"任务#2026"}]"#,
+        );
+        assert!(!reads.has_internal_reference("「第4项评审」与「任务#2026」"));
+        assert!(reads.has_internal_reference("删除第4条任务"));
+    }
 
     #[test]
     fn 原文漏项和未处理意图阻止整轮提交() {

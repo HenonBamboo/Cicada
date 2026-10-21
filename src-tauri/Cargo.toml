@@ -1,6 +1,6 @@
 [package]
 name = "cicada"
-version = "0.2.2"
+version = "0.2.3"
 description = "知了：你只管说，它来整理"
 authors = ["HenonBamboo"]
 license = "AGPL-3.0-only"
@@ -28,6 +28,7 @@ thiserror = "2"
 window-vibrancy = "0.8"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-notification = "2"
+tauri-plugin-dialog = "2"
 # 模型调用：HTTP + 流式（rustls 避免依赖系统 OpenSSL）
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

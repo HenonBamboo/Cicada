@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { ProjectNode } from "../../lib/types";
-import { MarkdownBlock, MarkdownInline, markdownToPlainText } from "../../lib/markdown";
+import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import { itemDescription, nodeDeadline } from "../../lib/nodePresentation";
 import { Check } from "../Check";
 import { Icon } from "../Icon";
@@ -51,15 +51,12 @@ function Row({
           </span>
         )}
       </div>
-      {(n.note || n.dueAt) && (
+      {n.dueAt && (
         <div className={`project-detail l${n.depth}`} data-item-details={itemDescription(n)}>
-          {n.dueAt && (
-            <span className="chip amber">
-              <Icon name="flag" />
-              截止 {nodeDeadline(n.dueAt)}
-            </span>
-          )}
-          {n.note && <MarkdownBlock text={n.note} />}
+          <span className="chip amber">
+            <Icon name="flag" />
+            截止 {nodeDeadline(n.dueAt)}
+          </span>
         </div>
       )}
       {hasKids && !closed && (

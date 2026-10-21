@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { exportData, importData, listOperationLog, type OperationEntry } from "../lib/settings";
+import { saveExport, importData, listOperationLog, type OperationEntry } from "../lib/settings";
 import { onDataChanged } from "../lib/commands";
 import { Row } from "./SettingsControls";
 export function DataExchange({
@@ -12,6 +12,7 @@ export function DataExchange({
   const file = useRef<HTMLInputElement>(null),
     [pending, setPending] = useState<{ name: string; content: string } | null>(null),
     [busy, setBusy] = useState(false),
+    [message, setMessage] = useState(""),
     [logs, setLogs] = useState<OperationEntry[]>([]);
   const refresh = () => listOperationLog().then(setLogs);
   useEffect(() => {
@@ -23,23 +24,19 @@ export function DataExchange({
   }, [report]);
   const act = async (fn: () => Promise<void>) => {
     setBusy(true);
+    setMessage("");
     try {
       await fn();
     } catch (e) {
-      report(String(e));
+      setMessage(String(e));
     } finally {
       setBusy(false);
     }
   };
   const download = (format: "json" | "markdown") =>
     act(async () => {
-      const data = await exportData(format);
-      const url = URL.createObjectURL(new Blob([data.content], { type: data.mimeType }));
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = data.fileName;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const path = await saveExport(format);
+      if (path) setMessage(`已导出到 ${path}`);
     });
   return (
     <>
@@ -64,17 +61,22 @@ export function DataExchange({
               e.target.value = "";
               if (!picked) return;
               if (picked.size > 10 * 1024 * 1024) {
-                report("导入文件不能超过 10 MB。");
+                setMessage("导入文件不能超过 10 MB。");
                 return;
               }
               void picked
                 .text()
                 .then((content) => setPending({ name: picked.name, content }))
-                .catch((e) => report(String(e)));
+                .catch((e) => setMessage(String(e)));
             }}
           />
         </div>
       </Row>
+      {message && (
+        <p className="settings-note" role="status">
+          {message}
+        </p>
+      )}
       {pending && (
         <div className="settings-note">
           <p>
@@ -91,7 +93,7 @@ export function DataExchange({
                   setPending(null);
                   await refresh();
                   await onImported();
-                  report(`已导入 ${result.tasks} 个任务、${result.nodes} 个项目节点。`);
+                  setMessage(`已导入 ${result.tasks} 个任务、${result.nodes} 个项目节点。`);
                 })
               }
             >

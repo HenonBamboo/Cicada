@@ -101,6 +101,8 @@ pub const CONFIRM_THRESHOLD: usize = 3;
 
 struct TaskInfo {
     title: String,
+    planned_date: String,
+    remind_at: Option<String>,
     version: i64,
     status: String,
     done_date: Option<String>,
@@ -167,7 +169,7 @@ impl Service<'_> {
         Ok(self
             .conn
             .query_row(
-                "SELECT title, version, status, done_date FROM tasks WHERE id = ?1",
+                "SELECT title, version, status, done_date, planned_date, remind_at FROM tasks WHERE id = ?1",
                 [id],
                 |r| {
                     Ok(TaskInfo {
@@ -175,6 +177,8 @@ impl Service<'_> {
                         version: r.get(1)?,
                         status: r.get(2)?,
                         done_date: r.get(3)?,
+                        planned_date: r.get(4)?,
+                        remind_at: r.get(5)?,
                     })
                 },
             )
@@ -211,12 +215,12 @@ impl Service<'_> {
                 }
                 TaskRef::Id(id) => {
                     if deleted.contains(id) {
-                        return Err(AppError::Invalid(format!(
-                            "任务 #{id} 在这次操作中已被删除"
-                        )));
+                        return Err(AppError::Invalid(
+                            "这件任务在本次操作中已被删除，请勿重复操作".into(),
+                        ));
                     }
                     let info = self.task_info(*id)?.ok_or_else(|| {
-                        AppError::Invalid(format!("任务 #{id} 不存在，请先查询再操作"))
+                        AppError::Invalid("这件任务已经不存在，请重新查询当前内容".into())
                     })?;
                     if !pins.iter().any(|p| p.id == *id) {
                         pins.push(Pin {
@@ -249,17 +253,10 @@ impl Service<'_> {
                     }
                     check_opt("截止时间", due_at, valid_datetime, "YYYY-MM-DDTHH:MM:SS")?;
                     check_opt("提醒时间", remind_at, valid_datetime, "YYYY-MM-DDTHH:MM:SS")?;
-                    let mut text = format!("添加「{}」", title.trim());
-                    let mut extra = Vec::new();
-                    if planned_date != &today {
-                        extra.push(short_date(&today, planned_date));
-                    }
-                    if let Some(r) = remind_at.as_deref().filter(|s| !s.is_empty()) {
-                        extra.push(format!("{} 提醒", &r[11..16]));
-                    }
-                    if !extra.is_empty() {
-                        text.push_str(&format!("（{}）", extra.join("，")));
-                    }
+                    let text = format!(
+                        "添加{}",
+                        super::query::task_label(title.trim(), planned_date, remind_at.as_deref())
+                    );
                     preview.push(item("plus", text, false));
                     temp_titles.push(title.trim().to_string());
                 }
@@ -271,7 +268,17 @@ impl Service<'_> {
                     remind_at,
                     ..
                 } => {
-                    let (id, name, _) = resolve(task, &temp_titles, &deleted)?;
+                    let (id, name, info) = resolve(task, &temp_titles, &deleted)?;
+                    let label = info.as_ref().map_or_else(
+                        || format!("「{name}」"),
+                        |info| {
+                            super::query::task_label(
+                                &name,
+                                &info.planned_date,
+                                info.remind_at.as_deref(),
+                            )
+                        },
+                    );
                     if let Some(t) = title {
                         check_title(t)?;
                     }
@@ -306,18 +313,24 @@ impl Service<'_> {
                     if parts.is_empty() {
                         parts.push("修改备注".into());
                     }
-                    preview.push(item(
-                        "edit",
-                        format!("「{name}」{}", parts.join("，")),
-                        false,
-                    ));
+                    preview.push(item("edit", format!("{label}{}", parts.join("，")), false));
                     if let Some(id) = id {
                         touched.insert(id);
                     }
                 }
                 Change::TaskDelete { task } => {
-                    let (id, name, _) = resolve(task, &temp_titles, &deleted)?;
-                    preview.push(item("trash", format!("删除「{name}」"), true));
+                    let (id, name, info) = resolve(task, &temp_titles, &deleted)?;
+                    let label = info.as_ref().map_or_else(
+                        || format!("「{name}」"),
+                        |info| {
+                            super::query::task_label(
+                                &name,
+                                &info.planned_date,
+                                info.remind_at.as_deref(),
+                            )
+                        },
+                    );
+                    preview.push(item("trash", format!("删除{label}"), true));
                     dangerous = true;
                     if let Some(id) = id {
                         touched.insert(id);
@@ -326,6 +339,16 @@ impl Service<'_> {
                 }
                 Change::TaskSetDone { task, done } => {
                     let (id, name, info) = resolve(task, &temp_titles, &deleted)?;
+                    let label = info.as_ref().map_or_else(
+                        || format!("「{name}」"),
+                        |info| {
+                            super::query::task_label(
+                                &name,
+                                &info.planned_date,
+                                info.remind_at.as_deref(),
+                            )
+                        },
+                    );
                     if let Some(info) = &info {
                         let is_done = info.status == "done";
                         if is_done == *done {
@@ -337,7 +360,7 @@ impl Service<'_> {
                             preview.push(item(
                                 "undo",
                                 format!(
-                                    "把 {} 完成的「{name}」改回未完成",
+                                    "把 {} 完成的{label}改回未完成",
                                     info.done_date.clone().unwrap_or_default()
                                 ),
                                 true,
@@ -345,12 +368,12 @@ impl Service<'_> {
                         } else {
                             preview.push(item(
                                 "check",
-                                format!("{}「{name}」", if *done { "完成" } else { "取消完成" }),
+                                format!("{}{label}", if *done { "完成" } else { "取消完成" }),
                                 false,
                             ));
                         }
                     } else {
-                        preview.push(item("check", format!("完成「{name}」"), false));
+                        preview.push(item("check", format!("完成{label}"), false));
                     }
                     if let Some(id) = id {
                         touched.insert(id);
@@ -574,7 +597,7 @@ mod tests {
         ];
         let v = svc.validate_plan(&plan).unwrap();
         assert!(!v.dangerous);
-        assert_eq!(v.preview[0].text, "添加「买菜」");
+        assert_eq!(v.preview[0].text, "添加「买菜」（计划 2026-10-17）");
         let a = svc.apply_plan(&plan, &v.pins, "g1", Source::Chat).unwrap();
         assert_eq!(a.changes.tasks.len(), 1);
         assert_eq!(
@@ -696,7 +719,7 @@ mod tests {
         let v = svc.validate_plan(&plan).unwrap();
         assert_eq!(
             v.preview[0].text,
-            "「开会」改名为「产品评审会」，改到明天，取消提醒"
+            "「开会」（计划 2026-10-17，15:00 提醒）改名为「产品评审会」，改到明天，取消提醒"
         );
         svc.apply_plan(&plan, &v.pins, "g", Source::Chat).unwrap();
         let (t, d, r): (String, String, Option<String>) = conn

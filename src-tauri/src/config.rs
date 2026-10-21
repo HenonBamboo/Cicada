@@ -10,7 +10,7 @@ use crate::clock::parse_cutoff;
 use crate::error::{AppError, AppResult};
 use crate::llm::{Endpoint, ProviderId};
 
-pub const CONFIG_VERSION: u32 = 3;
+pub const CONFIG_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -113,6 +113,14 @@ pub struct AutomationSettings {
     pub review_time: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StartupView {
+    #[default]
+    Main,
+    Sticky,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct DesktopSettings {
@@ -120,7 +128,7 @@ pub struct DesktopSettings {
     pub main_shortcut: String,
     pub sticky_shortcut: String,
     pub autostart: bool,
-    pub show_stickies_on_startup: bool,
+    pub startup_view: StartupView,
     pub close_to_tray: bool,
 }
 impl Default for DesktopSettings {
@@ -130,7 +138,7 @@ impl Default for DesktopSettings {
             main_shortcut: "Ctrl+Alt+Z".into(),
             sticky_shortcut: "Ctrl+Alt+S".into(),
             autostart: !cfg!(debug_assertions),
-            show_stickies_on_startup: false,
+            startup_view: StartupView::Main,
             close_to_tray: true,
         }
     }
@@ -243,6 +251,11 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
+    /// 启动只显示用户所选界面；需要设置时仍可从托盘打开主体。
+    pub fn show_main_on_startup(&self) -> bool {
+        self.desktop.startup_view == StartupView::Main
+    }
+
     pub fn validate(&self) -> AppResult<()> {
         self.appearance.validate()?;
         parse_cutoff(&self.time.day_cutoff)?;
@@ -261,8 +274,26 @@ impl AppConfig {
             return Ok(cfg);
         }
         let text = std::fs::read_to_string(path)?;
-        let parsed = serde_json::from_str::<Self>(&text)
+        let parsed = serde_json::from_str::<Value>(&text)
             .map_err(AppError::from)
+            .and_then(|mut value| {
+                let version = value.get("version").and_then(Value::as_u64).unwrap_or(0);
+                if version < 4
+                    && let Some(desktop) = value.get_mut("desktop").and_then(Value::as_object_mut)
+                    && !desktop.contains_key("startupView")
+                {
+                    let sticky = version >= 2
+                        && desktop
+                            .get("showStickiesOnStartup")
+                            .and_then(Value::as_bool)
+                            == Some(true);
+                    desktop.insert(
+                        "startupView".into(),
+                        Value::String(if sticky { "sticky" } else { "main" }.into()),
+                    );
+                }
+                serde_json::from_value::<Self>(value).map_err(AppError::from)
+            })
             .and_then(|mut cfg| {
                 let mut migrated = false;
                 if cfg.version < 2 {
@@ -271,7 +302,7 @@ impl AppConfig {
                     if cfg.desktop.quick_shortcut == "Alt+Space" {
                         cfg.desktop.quick_shortcut = "Ctrl+Alt+Space".into();
                     }
-                    cfg.desktop.show_stickies_on_startup = false;
+                    cfg.desktop.startup_view = StartupView::Main;
                     migrated = true;
                 }
                 if cfg.version < CONFIG_VERSION {
@@ -330,14 +361,14 @@ mod tests {
         let mut cfg = AppConfig::load_or_create(&path).unwrap();
         assert_eq!(cfg.version, CONFIG_VERSION);
         assert_eq!(cfg.desktop.quick_shortcut, "Ctrl+Alt+Space");
-        assert!(!cfg.desktop.show_stickies_on_startup);
+        assert_eq!(cfg.desktop.startup_view, StartupView::Main);
         assert_eq!(cfg.appearance.theme, ThemeChoice::Paper);
         assert_eq!(cfg.appearance.font_size, Scale::Medium); // 缺省字段取默认值
         assert!(!cfg.onboarding_completed);
         cfg.onboarding_completed = true;
         cfg.appearance.theme = ThemeChoice::Forest;
         cfg.desktop.quick_shortcut = "Ctrl+Shift+K".into();
-        cfg.desktop.show_stickies_on_startup = false;
+        cfg.desktop.startup_view = StartupView::Main;
         cfg.desktop.close_to_tray = false;
         cfg.sticky.color = "pink".into();
         cfg.sticky.opacity = 0.75;
@@ -367,6 +398,36 @@ mod tests {
             .filter_map(Result::ok)
             .any(|e| e.file_name().to_string_lossy().contains("broken"));
         assert!(broken, "原文件应改名保留");
+    }
+
+    #[test]
+    fn 旧便利贴启动开关迁移为互斥启动界面() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.json");
+        for (show, expected) in [(false, StartupView::Main), (true, StartupView::Sticky)] {
+            std::fs::write(
+                &path,
+                serde_json::json!({
+                    "version": 3,
+                    "onboardingCompleted": true,
+                    "desktop": {"showStickiesOnStartup": show}
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let config = AppConfig::load_or_create(&path).unwrap();
+            assert_eq!(config.desktop.startup_view, expected);
+            assert_eq!(config.show_main_on_startup(), !show);
+            let saved = std::fs::read_to_string(&path).unwrap();
+            assert!(!saved.contains("showStickiesOnStartup"));
+            assert!(saved.contains("startupView"));
+        }
+        let mut config = AppConfig::default();
+        config.desktop.startup_view = StartupView::Sticky;
+        assert!(
+            !config.show_main_on_startup(),
+            "明确选择便利贴时不能被引导状态改为主界面"
+        );
     }
 
     #[test]

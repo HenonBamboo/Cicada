@@ -1,6 +1,12 @@
 import { ThemeMenu } from "../../components/ThemeMenu";
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
-import { MotionConfig } from "motion/react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  AnimatePresence,
+  motion,
+  MotionConfig,
+  useIsPresent,
+  useReducedMotion,
+} from "motion/react";
 import { Composer } from "../../components/Composer";
 import { Greeting, Summary } from "../../components/Greeting";
 import { Heatmap } from "../../components/Heatmap";
@@ -36,7 +42,25 @@ import {
 } from "../../lib/desktop";
 import "./main.css";
 
+function SettingsTransition({ children, duration }: { children: ReactNode; duration: number }) {
+  const present = useIsPresent();
+  return (
+    <motion.div
+      className="settings-host"
+      inert={!present}
+      aria-hidden={!present}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 4 }}
+      transition={{ duration }}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
 export function MainWindow() {
+  const reduceMotion = useReducedMotion();
   const { state: app, error: appError } = useAppState();
   const { board, heat, error, flash, reload } = useBoard();
   const [focused, setFocused] = useState(false);
@@ -246,6 +270,7 @@ export function MainWindow() {
   };
 
   const motionOn = app?.config.appearance.motion ?? true;
+  const pageTransition = { duration: motionOn && !reduceMotion ? 0.16 : 0 };
   const err = appError ?? error;
 
   return (
@@ -285,172 +310,202 @@ export function MainWindow() {
             {settings ? "返回" : "设置"}
           </button>
         </TitleBar>
-        {settings && (
-          <Settings
-            dataDir={app?.dataDir ?? ""}
-            onBack={() => setSettings(false)}
-            onboarding={onboarding}
-            onModelSaved={onboarding ? tryFirstMessage : undefined}
-          />
-        )}
-        <main
-          className="stage"
-          style={settings ? { display: "none" } : undefined}
-          onMouseDown={onStageDown}
-        >
-          <section className="hero">
-            {board ? (
-              <Greeting date={board.businessDate} tasks={board.tasks} />
-            ) : (
-              <h1 className="greeting">知了</h1>
+        <div className="page-stack">
+          <AnimatePresence initial={false}>
+            {settings && (
+              <SettingsTransition key="settings" duration={pageTransition.duration}>
+                <Settings
+                  dataDir={app?.dataDir ?? ""}
+                  onBack={() => setSettings(false)}
+                  onboarding={onboarding}
+                  onModelSaved={onboarding ? tryFirstMessage : undefined}
+                  onInstallUpdate={() => void updateNow()}
+                  updating={updating}
+                  updateError={updateError}
+                />
+              </SettingsTransition>
             )}
+          </AnimatePresence>
+          <motion.main
+            className="stage"
+            initial={false}
+            animate={{ opacity: settings ? 0 : 1, y: settings ? -4 : 0 }}
+            transition={pageTransition}
+            inert={settings}
+            aria-hidden={settings}
+            onMouseDown={onStageDown}
+          >
+            <section className="hero">
+              {board ? (
+                <Greeting date={board.businessDate} tasks={board.tasks} />
+              ) : (
+                <h1 className="greeting">知了</h1>
+              )}
 
-            <Composer
-              mode={mode}
-              onModeChange={setMode}
-              onSubmit={submit}
-              onFocus={() => setFocused(true)}
-              busy={operationBusy}
-              focusRequest={focusRequest}
-            />
+              <Composer
+                mode={mode}
+                onModeChange={setMode}
+                onSubmit={submit}
+                onFocus={() => setFocused(true)}
+                busy={operationBusy}
+                focusRequest={focusRequest}
+              />
+
+              {board && (
+                <Summary
+                  tasks={board.tasks}
+                  activeProjects={board.projects.filter((p) => p.projectStatus === "active").length}
+                />
+              )}
+
+              {agent.inbox.length > 0 && (
+                <button
+                  className="btn ghost inbox-link"
+                  disabled={operationBusy}
+                  onClick={agent.openInbox}
+                >
+                  收件箱 {agent.inbox.length} 条
+                </button>
+              )}
+
+              {err && !reply && (
+                <ReplyCard
+                  view={{ kind: "message", status: "没有完成", lead: err, tone: "danger" }}
+                  onClose={() => void reload()}
+                />
+              )}
+              {update && !busy && !reply && (
+                <ReplyCard
+                  view={{
+                    kind: "message",
+                    status: `发现新版本 ${update.version}`,
+                    lead:
+                      updateError ||
+                      (updating
+                        ? "正在下载并验证更新，完成后会重新启动。"
+                        : update.notes || "有新版本可更新，确认后将替换程序并重新启动。"),
+                    tone: updateError ? "danger" : undefined,
+                  }}
+                  onClose={() => {
+                    if (!updating) setUpdate(null);
+                  }}
+                >
+                  <div className="reply-actions">
+                    <button
+                      className="btn primary"
+                      disabled={updating}
+                      onClick={() => void updateNow()}
+                    >
+                      {updating ? "正在更新" : "更新"}
+                    </button>
+                    <button className="btn" disabled={updating} onClick={() => setUpdate(null)}>
+                      稍后
+                    </button>
+                  </div>
+                </ReplyCard>
+              )}
+              {reply && (
+                <ReplyCard view={reply} onClose={() => setReply(null)}>
+                  {agent.showInbox && (
+                    <InboxList
+                      items={agent.inbox}
+                      busy={operationBusy}
+                      onRetry={(item) => {
+                        setMode(item.mode);
+                        void agent.retry(item);
+                      }}
+                      onDiscard={(id) => void agent.discard(id)}
+                    />
+                  )}
+                  {agent.result && (
+                    <div className="reply-actions">
+                      {agent.result.kind === "confirm" && (
+                        <>
+                          <button
+                            className="btn primary"
+                            disabled={operationBusy}
+                            onClick={() => void agent.confirm()}
+                          >
+                            确认
+                          </button>
+                          <button
+                            className="btn"
+                            disabled={operationBusy}
+                            onClick={() => void agent.cancel()}
+                          >
+                            算了
+                          </button>
+                        </>
+                      )}
+                      {agent.result.kind === "done" && (
+                        <button
+                          className="btn ghost"
+                          disabled={operationBusy}
+                          onClick={() => void agent.undo()}
+                        >
+                          撤销
+                        </button>
+                      )}
+                      {agent.result.kind === "unconfigured" && (
+                        <button
+                          className="btn"
+                          disabled={updating}
+                          onClick={() => setSettings(true)}
+                        >
+                          前往设置
+                        </button>
+                      )}
+                      {agent.result.kind === "clarify" &&
+                        agent.result.entityOptions?.length > 0 &&
+                        agent.result.entityOptions.map((option) => (
+                          <button
+                            key={option.value}
+                            className="btn"
+                            disabled={operationBusy}
+                            onClick={() => void agent.submit(option.label, mode, [], option.value)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      {agent.result.kind === "clarify" &&
+                        !agent.result.entityOptions?.length &&
+                        agent.result.options.map((option) => (
+                          <button
+                            key={option}
+                            className="btn"
+                            disabled={operationBusy}
+                            onClick={() => void submit(option, [])}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </ReplyCard>
+              )}
+            </section>
 
             {board && (
-              <Summary
-                tasks={board.tasks}
-                activeProjects={board.projects.filter((p) => p.projectStatus === "active").length}
-              />
-            )}
-
-            {agent.inbox.length > 0 && (
-              <button
-                className="btn ghost inbox-link"
-                disabled={operationBusy}
-                onClick={agent.openInbox}
-              >
-                收件箱 {agent.inbox.length} 条
-              </button>
-            )}
-
-            {err && !reply && (
-              <ReplyCard
-                view={{ kind: "message", status: "没有完成", lead: err, tone: "danger" }}
-                onClose={() => void reload()}
-              />
-            )}
-            {update && !busy && !reply && (
-              <ReplyCard
-                view={{
-                  kind: "message",
-                  status: `发现新版本 ${update.version}`,
-                  lead:
-                    updateError ||
-                    (updating
-                      ? "正在下载并验证更新，完成后会重新启动。"
-                      : update.notes || "有新版本可更新，确认后将替换程序并重新启动。"),
-                  tone: updateError ? "danger" : undefined,
-                }}
-                onClose={() => {
-                  if (!updating) setUpdate(null);
-                }}
-              >
-                <div className="reply-actions">
-                  <button
-                    className="btn primary"
-                    disabled={updating}
-                    onClick={() => void updateNow()}
-                  >
-                    {updating ? "正在更新" : "更新"}
-                  </button>
-                  <button className="btn" disabled={updating} onClick={() => setUpdate(null)}>
-                    稍后
-                  </button>
-                </div>
-              </ReplyCard>
-            )}
-            {reply && (
-              <ReplyCard view={reply} onClose={() => setReply(null)}>
-                {agent.showInbox && (
-                  <InboxList
-                    items={agent.inbox}
-                    busy={operationBusy}
-                    onRetry={(item) => {
-                      setMode(item.mode);
-                      void agent.retry(item);
-                    }}
-                    onDiscard={(id) => void agent.discard(id)}
-                  />
-                )}
-                {agent.result && (
-                  <div className="reply-actions">
-                    {agent.result.kind === "confirm" && (
-                      <>
-                        <button
-                          className="btn primary"
-                          disabled={operationBusy}
-                          onClick={() => void agent.confirm()}
-                        >
-                          确认
-                        </button>
-                        <button
-                          className="btn"
-                          disabled={operationBusy}
-                          onClick={() => void agent.cancel()}
-                        >
-                          算了
-                        </button>
-                      </>
-                    )}
-                    {agent.result.kind === "done" && (
-                      <button
-                        className="btn ghost"
-                        disabled={operationBusy}
-                        onClick={() => void agent.undo()}
-                      >
-                        撤销
-                      </button>
-                    )}
-                    {agent.result.kind === "unconfigured" && (
-                      <button className="btn" disabled={updating} onClick={() => setSettings(true)}>
-                        前往设置
-                      </button>
-                    )}
-                    {agent.result.kind === "clarify" &&
-                      agent.result.options.map((option) => (
-                        <button
-                          key={option}
-                          className="btn"
-                          disabled={operationBusy}
-                          onClick={() => void submit(option, [])}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </ReplyCard>
-            )}
-          </section>
-
-          {board && (
-            <section className="board" aria-label="任务与项目" aria-hidden={!focused}>
-              <Heatmap
-                today={board.businessDate}
-                days={heat}
-                onPickDay={(d) => void pickDay(d)}
-                onReports={() => void showReports()}
-              />
-              <div className="panels">
-                <TaskPanel
-                  tasks={board.tasks}
+              <section className="board" aria-label="任务与项目" aria-hidden={!focused}>
+                <Heatmap
                   today={board.businessDate}
-                  flash={flash}
-                  onToggle={toggleTask}
+                  days={heat}
+                  onPickDay={(d) => void pickDay(d)}
+                  onReports={() => void showReports()}
                 />
-                <ProjectPanel projects={board.projects} flash={flash} />
-              </div>
-            </section>
-          )}
-        </main>
+                <div className="panels">
+                  <TaskPanel
+                    tasks={board.tasks}
+                    today={board.businessDate}
+                    flash={flash}
+                    onToggle={toggleTask}
+                  />
+                  <ProjectPanel projects={board.projects} flash={flash} />
+                </div>
+              </section>
+            )}
+          </motion.main>
+        </div>
       </div>
     </MotionConfig>
   );

@@ -23,6 +23,7 @@ pub async fn submit_input(
     images: Vec<String>,
     request_id: Option<String>,
     reply_to: Option<String>,
+    selection_token: Option<String>,
 ) -> AppResult<AgentReply> {
     let _maintenance = state.maintenance.read().await;
     agent_ctx!(ctx, app, state);
@@ -32,7 +33,16 @@ pub async fn submit_input(
         text,
         images,
     };
-    let r = if let Some(reply_to) = reply_to {
+    let r = if let Some(token) = selection_token {
+        let reply_to = reply_to
+            .ok_or_else(|| crate::error::AppError::Invalid("请选择当前追问中的选项".into()))?;
+        if !input.images.is_empty() {
+            return Err(crate::error::AppError::Invalid(
+                "选择追问选项时不能附带图片".into(),
+            ));
+        }
+        agent::respond_selection(&ctx, &reply_to, &token).await
+    } else if let Some(reply_to) = reply_to {
         agent::respond_to(&ctx, input, request_id, &reply_to).await
     } else {
         agent::submit_with_id(&ctx, input, request_id).await

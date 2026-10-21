@@ -99,7 +99,7 @@ export function useAgent() {
         lead: inbox.length ? "这些输入还在等待处理。" : "收件箱已清空。",
       });
     },
-    submit: (text: string, mode: Mode, images: string[]) => {
+    submit: (text: string, mode: Mode, images: string[], selectionToken?: string) => {
       const id = crypto.randomUUID();
       return run(
         () =>
@@ -109,6 +109,7 @@ export function useAgent() {
             images,
             id,
             result?.kind === "clarify" || result?.kind === "confirm" ? result.requestId : undefined,
+            selectionToken,
           ),
         id,
         result?.kind === "clarify" || result?.kind === "confirm" ? result.requestId : undefined,

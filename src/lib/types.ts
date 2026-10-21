@@ -120,6 +120,7 @@ export interface Reply {
   lead: string;
   items: { icon: string; text: string; danger: boolean }[];
   options: string[];
+  entityOptions: { label: string; value: string }[];
   changes: ChangeSet;
 }
 

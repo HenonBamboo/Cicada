@@ -7,6 +7,7 @@
 //! 5. 原子提交（只有这一步持有写事务，等待模型和用户时不占用写锁）；
 //! 6. 返回结果，发数据变更事件。
 
+mod clarify;
 mod context;
 mod intent;
 mod project_tools;
@@ -113,6 +114,8 @@ struct ClarifyContext {
     pins: Vec<Pin>,
     #[serde(default)]
     snapshots: Option<Vec<serde_json::Value>>,
+    #[serde(default)]
+    entity_options: Vec<clarify::PendingOption>,
 }
 
 /// 待确认时保存的上下文
@@ -121,6 +124,8 @@ struct ConfirmContext {
     text: String,
     #[serde(default)]
     query_only: bool,
+    #[serde(default)]
+    snapshots: Option<Vec<serde_json::Value>>,
 }
 
 enum ModelRef<'a> {
@@ -520,11 +525,22 @@ pub async fn process(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
                 false,
             ))
         } else {
-            Ok(AgentReply::clarify(
+            let mut reply = AgentReply::clarify(
                 id,
                 item.result_summary.unwrap_or_else(|| "请补充说明".into()),
                 serde_json::from_str(p.preview.as_deref().unwrap_or("[]"))?,
-            ))
+            );
+            let context: ClarifyContext =
+                serde_json::from_str(p.context.as_deref().unwrap_or("{}"))?;
+            reply.entity_options = context
+                .entity_options
+                .iter()
+                .filter(|choice| {
+                    choice.expires_at.as_str() > now_plus_minutes(ctx.clock, 0).as_str()
+                })
+                .map(clarify::PendingOption::view)
+                .collect();
+            Ok(reply)
         };
     }
     if item.status_reason.as_deref() == Some("images_expired") {
@@ -548,7 +564,7 @@ pub async fn process(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
 async fn run(
     ctx: &Ctx<'_>,
     id: &str,
-    resume: Option<(ClarifyContext, String)>,
+    resume: Option<(ClarifyContext, String, Option<clarify::PendingOption>)>,
 ) -> AppResult<AgentReply> {
     let item = ctx.svc(|s| s.inbox_get(id))?;
     if item.status == Status::Done {
@@ -624,10 +640,15 @@ async fn run(
     }
 
     let (mut messages, mut plan, mut checklist, mut reads) = match resume {
-        Some((c, answer)) => {
+        Some((mut c, answer, selection)) => {
             if !c.plan.is_empty() {
                 let current = ctx.svc(|s| s.plan_snapshots(&c.pins));
-                if c.snapshots.is_none() || current.as_ref().ok() != c.snapshots.as_ref() {
+                if !c
+                    .snapshots
+                    .as_ref()
+                    .zip(current.as_ref().ok())
+                    .is_some_and(|(old, new)| clarify::same_snapshots(old, new))
+                {
                     return fail(
                         ctx,
                         id,
@@ -635,6 +656,23 @@ async fn run(
                         "追问期间相关内容已变化，或旧版暂存计划无法安全续答；没有执行改动，请重新输入完整要求。",
                     );
                 }
+            }
+            if let Some(choice) = &selection {
+                let current = ctx.svc(|s| s.plan_snapshots(&choice.pins));
+                if !current
+                    .as_ref()
+                    .ok()
+                    .is_some_and(|new| clarify::same_snapshots(&choice.snapshots, new))
+                {
+                    return fail(
+                        ctx,
+                        id,
+                        &item.image_paths,
+                        "选项中的内容已经变化，没有执行任何改动，请重新查询后选择。",
+                    );
+                }
+                c.checklist.selection_context(&answer);
+                c.reads.select(&choice.targets);
             }
             if !c.source.is_empty() {
                 intent_source = c.source;
@@ -644,11 +682,17 @@ async fn run(
             let mut m = c.messages;
             m.push(Message::ToolResult {
                 call_id: c.call_id,
-                content: format!("用户回答：{answer}"),
+                content: match selection {
+                    Some(choice) => serde_json::json!({
+                        "answer": answer, "selectedTargets": choice.targets,
+                        "instruction": "这些是用户明确选择的实体。选择文字已登记为context；不要重新创建意图或重新执行旧操作，仍须查询当前状态后继续原write意图。"
+                    }).to_string(),
+                    None => format!("用户回答：{answer}\n程序提示：用 intent_checklist(append=true) 只补充本次回答的原文意图，已登记的原始要求会保留；新增独立操作不能标为context。"),
+                },
                 is_error: false,
             });
             // 完整对话保留，但回答后已有目标仍须重新查询当前状态。
-            (m, c.plan, c.checklist, intent::ReadScope::default())
+            (m, c.plan, c.checklist, c.reads.restart())
         }
         None => (
             vec![Message::User { text: user_text }],
@@ -680,6 +724,7 @@ async fn run(
     let specs = tool_specs(&item.mode);
     let mut final_text = String::new();
     let mut finished = false;
+    let mut failures = intent::FailureTracker::default();
     for _ in 0..MAX_ROUNDS {
         let req = ChatRequest {
             system: &system,
@@ -687,22 +732,10 @@ async fn run(
             images: &[],
             tools: &specs,
         };
-        let started = std::sync::atomic::AtomicBool::new(false);
         let resp = match chat
             .get()
-            .chat(&req, &|t| {
-                let delta = if started.load(std::sync::atomic::Ordering::Relaxed) {
-                    t
-                } else {
-                    t.trim_start_matches(|c: char| {
-                        c.is_whitespace() || matches!(c, '\u{feff}' | '\u{200b}')
-                    })
-                };
-                if !delta.is_empty() {
-                    started.store(true, std::sync::atomic::Ordering::Relaxed);
-                    (ctx.on_delta)(id, delta);
-                }
-            })
+            // 工具中间文字可能含内部定位或未提交的完成声明，校验前不直出给界面。
+            .chat(&req, &|_| {})
             .await
         {
             Ok(r) => r,
@@ -727,12 +760,40 @@ async fn run(
         });
         if resp.tool_calls.is_empty() {
             if let Some(missing) = checklist.incomplete(plan.len(), &intent_source) {
+                if failures.repeated(&format!("coverage:{missing}")) {
+                    return fail(
+                        ctx,
+                        id,
+                        &item.image_paths,
+                        "模型未能完整整理本次要求，没有执行任何改动。请重新说明需要处理的内容。",
+                    );
+                }
                 messages.push(Message::User {
                     text: format!("程序校验：{missing} 当前没有提交任何改动。"),
                 });
                 continue;
             }
+            let visible_text = if plan.is_empty() {
+                resp.text.clone()
+            } else {
+                checklist.query_answers()
+            };
+            if reads.has_internal_reference(&visible_text) {
+                if failures.repeated("reply:internal-reference") {
+                    return fail(
+                        ctx,
+                        id,
+                        &item.image_paths,
+                        "模型未能用名称和时间准确说明本次内容，没有执行任何改动。请重新说明需要处理的内容。",
+                    );
+                }
+                messages.push(Message::User { text: "回复及intent_resolve的evidence不能使用内部编号或第几条定位，请改用任务标题、计划日期、提醒时间或完整项目路径。若已有查询结论含编号，请重新intent_resolve修正evidence；不要重复调用已经成功的写工具。".into() });
+                continue;
+            }
             final_text = resp.text;
+            if plan.is_empty() && !final_text.trim().is_empty() {
+                (ctx.on_delta)(id, &clean_reply(&final_text));
+            }
             finished = true;
             break;
         }
@@ -742,7 +803,7 @@ async fn run(
             let mut owner = None;
             let prepared = if !specs.iter().any(|spec| spec.name == call.name) {
                 Err(format!(
-                    "当前模式不能使用 {}，请用 Tab 切换模式。",
+                    "当前模式不能使用 {}，请用 Ctrl+Tab 切换模式。",
                     call.name
                 ))
             } else if intent::is_write(&call.name) {
@@ -770,6 +831,9 @@ async fn run(
                     }
                 }
                 Ok(call) if call.name == "report_get" => report_tools::handle(ctx, &call),
+                Ok(call) if call.name == "ask_clarify" => {
+                    ctx.svc(|s| Ok(clarify::handle(s, &call, &reads)))?
+                }
                 Ok(call) => ctx.svc(|s| {
                     Ok(tools::handle_mode(
                         s,
@@ -792,12 +856,36 @@ async fn run(
                     content,
                     is_error: false,
                 }),
-                tools::Outcome::Error(content) => messages.push(Message::ToolResult {
-                    call_id: call.id.clone(),
-                    content,
-                    is_error: true,
-                }),
-                tools::Outcome::Clarify { question, options } => {
+                tools::Outcome::Error(content) => {
+                    if failures.repeated(&format!("{}:{content}", call.name)) {
+                        let reason = if call.name.starts_with("intent_")
+                            || content.contains("意图")
+                            || content.contains("原文")
+                        {
+                            "模型未能完整整理本次要求"
+                        } else if call.name == "ask_clarify" {
+                            "模型未能生成可辨认的选择内容"
+                        } else {
+                            "模型未能准确匹配并处理当前内容"
+                        };
+                        return fail(
+                            ctx,
+                            id,
+                            &item.image_paths,
+                            &format!("{reason}，没有执行任何改动。请用名称和日期重新说明。"),
+                        );
+                    }
+                    messages.push(Message::ToolResult {
+                        call_id: call.id.clone(),
+                        content,
+                        is_error: true,
+                    });
+                }
+                tools::Outcome::Clarify {
+                    question,
+                    options,
+                    mut entity_options,
+                } => {
                     // 同一轮里后面的调用不再执行，但每个调用都要有结果
                     for rest in &calls[i + 1..] {
                         messages.push(Message::ToolResult {
@@ -811,6 +899,14 @@ async fn run(
                         let snapshots = s.plan_snapshots(&pins)?;
                         Ok((pins, snapshots))
                     })?;
+                    let expires = now_plus_minutes(ctx.clock, PENDING_MINUTES);
+                    for choice in &mut entity_options {
+                        choice.expires_at = expires.clone();
+                    }
+                    let option_views = entity_options
+                        .iter()
+                        .map(clarify::PendingOption::view)
+                        .collect();
                     let context = ClarifyContext {
                         messages,
                         call_id: call.id.clone(),
@@ -820,10 +916,10 @@ async fn run(
                         source: intent_source,
                         pins,
                         snapshots: Some(snapshots),
+                        entity_options,
                     };
                     let json = serde_json::to_string(&context)?;
                     let options_json = serde_json::to_string(&options)?;
-                    let expires = now_plus_minutes(ctx.clock, PENDING_MINUTES);
                     ctx.svc(|s| {
                         s.pending_save(NewPending {
                             request_id: id,
@@ -836,7 +932,9 @@ async fn run(
                         })?;
                         s.inbox_set(id, Status::Awaiting, Some("clarify"), None, Some(&question))
                     })?;
-                    return Ok(AgentReply::clarify(id, question, options));
+                    let mut reply = AgentReply::clarify(id, question, options);
+                    reply.entity_options = option_views;
+                    return Ok(reply);
                 }
             }
         }
@@ -846,7 +944,7 @@ async fn run(
             ctx,
             id,
             &item.image_paths,
-            "处理步骤太多，没有完成。请把要求拆开说。",
+            "模型未能在本次处理中完成解析，没有执行任何改动。请用名称和日期重新说明。",
         );
     }
     let text = if plan.is_empty() {
@@ -866,7 +964,47 @@ async fn answer(ctx: &Ctx<'_>, id: &str, text: String) -> AppResult<AgentReply> 
         s.pending_delete(id)?;
         s.inbox_set(id, Status::Queued, None, None, None)
     })?;
-    run(ctx, id, Some((context, text))).await
+    run(ctx, id, Some((context, text, None))).await
+}
+
+/// 结构化选项的独立入口：一次性值不进入输入正文、历史或模型消息。
+pub async fn respond_selection(
+    ctx: &Ctx<'_>,
+    reply_to: &str,
+    selection_token: &str,
+) -> AppResult<AgentReply> {
+    ctx.svc(|s| s.pending_expire())?;
+    // 在同一个数据库锁内校验和消费，重复点击不能重新把已完成请求置回排队。
+    let (context, choice) = ctx.svc(|s| {
+        let pending = s
+            .pending_get(reply_to)?
+            .filter(|p| p.kind == "clarify")
+            .ok_or_else(|| AppError::Invalid("这个选项已经失效，请重新查询后选择".into()))?;
+        if s.inbox_get(reply_to)?.status != Status::Awaiting {
+            return Err(AppError::Invalid(
+                "这个选项已经处理过了，请勿重复选择".into(),
+            ));
+        }
+        let mut context: ClarifyContext =
+            serde_json::from_str(pending.context.as_deref().unwrap_or("{}"))?;
+        let choice = context
+            .entity_options
+            .iter()
+            .find(|option| option.value == selection_token)
+            .cloned()
+            .ok_or_else(|| AppError::Invalid("这个选项不属于当前问题，请重新选择".into()))?;
+        if choice.expires_at.as_str() <= now_plus_minutes(ctx.clock, 0).as_str() {
+            return Err(AppError::Invalid(
+                "这个选项已经过期，请重新查询后选择".into(),
+            ));
+        }
+        context.entity_options.clear();
+        s.pending_delete(reply_to)?;
+        s.inbox_set(reply_to, Status::Queued, None, None, None)?;
+        Ok((context, choice))
+    })?;
+    let text = choice.label.clone();
+    run(ctx, reply_to, Some((context, text, Some(choice)))).await
 }
 
 async fn finish(
@@ -909,6 +1047,7 @@ async fn finish(
         &validated.pins,
         &validated.preview,
         &text,
+        None,
     )
 }
 
@@ -927,6 +1066,7 @@ fn ask_confirm(
     let context = serde_json::to_string(&ConfirmContext {
         text: text.into(),
         query_only: true,
+        snapshots: Some(ctx.svc(|s| s.plan_snapshots(pins))?),
     })?;
     let expires = now_plus_minutes(ctx.clock, PENDING_MINUTES);
     ctx.svc(|s| {
@@ -952,6 +1092,7 @@ fn commit(
     pins: &[Pin],
     preview: &[PreviewItem],
     text: &str,
+    expected: Option<&[serde_json::Value]>,
 ) -> AppResult<AgentReply> {
     // 写入结果完全由实际通过校验并提交的操作生成，模型的结束语不能虚报或泄露内部编号。
     let lead = if preview.is_empty() {
@@ -965,6 +1106,23 @@ fn commit(
             return Ok(Err(item
                 .result_summary
                 .unwrap_or_else(|| "这件事已经处理过了。".into())));
+        }
+        if let Some(expected) = expected {
+            let current = s.plan_snapshots(pins)?;
+            if expected.len() != current.len()
+                || expected.iter().zip(&current).any(|(old, new)| {
+                    let entity = old["entity"].as_str().unwrap_or("");
+                    let old = &old["row"];
+                    let new = &new["row"];
+                    old["created_at"] != new["created_at"]
+                        || (new["version"].as_i64() <= old["version"].as_i64()
+                            && !clarify::same_row(entity, old, new))
+                })
+            {
+                return Err(AppError::Invalid(
+                    "待确认的内容已经被替换，没有执行任何改动，请重新查询".into(),
+                ));
+            }
         }
         let before: Vec<_> = s
             .parent_completion_candidates()?
@@ -1056,11 +1214,31 @@ pub async fn confirm(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
     let plan: Vec<Change> = serde_json::from_str(&p.plan)?;
     let pins: Vec<Pin> = serde_json::from_str(&p.versions)?;
     let preview: Vec<PreviewItem> = serde_json::from_str(p.preview.as_deref().unwrap_or("[]"))?;
-    let text = serde_json::from_str::<ConfirmContext>(p.context.as_deref().unwrap_or("{}"))
-        .map(|c| if c.query_only { c.text } else { String::new() })
-        .unwrap_or_default();
+    let context = serde_json::from_str::<ConfirmContext>(p.context.as_deref().unwrap_or("{}"))?;
     let item = ctx.svc(|s| s.inbox_get(id))?;
-    commit(ctx, id, &item.image_paths, &plan, &pins, &preview, &text)
+    let Some(snapshots) = context.snapshots else {
+        return fail(
+            ctx,
+            id,
+            &item.image_paths,
+            "旧版暂存的确认缺少安全快照，没有执行任何改动，请重新输入要求。",
+        );
+    };
+    let text = if context.query_only {
+        context.text
+    } else {
+        String::new()
+    };
+    commit(
+        ctx,
+        id,
+        &item.image_paths,
+        &plan,
+        &pins,
+        &preview,
+        &text,
+        Some(&snapshots),
+    )
 }
 
 pub fn cancel(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
@@ -1118,6 +1296,11 @@ fn model_error(ctx: &Ctx<'_>, id: &str, images: &[String], e: LlmError) -> AppRe
 }
 
 fn fail(ctx: &Ctx<'_>, id: &str, _images: &[String], msg: &str) -> AppResult<AgentReply> {
+    let msg = if clarify::has_internal_reference(msg) {
+        "当前内容无法准确定位，没有执行任何改动，请用名称和日期重新说明。"
+    } else {
+        msg
+    };
     ctx.svc(|s| {
         s.pending_delete(id)?;
         s.inbox_set(id, Status::Failed, None, Some(msg), None)

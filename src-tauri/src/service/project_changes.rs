@@ -62,6 +62,7 @@ pub struct NodeBrief {
     pub note: Option<String>,
     pub due_at: Option<String>,
     pub done_at: Option<String>,
+    pub created_at: String,
     pub version: i64,
     pub progress: Option<Progress>,
 }
@@ -71,7 +72,7 @@ impl Service<'_> {
         let mut stmt = self.conn.prepare(
             "SELECT id,parent_id,depth,title,status,project_status,note,due_at,done_at,version,
              (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=nodes.id),
-             (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=nodes.id AND c.status='done')
+             (SELECT COUNT(*) FROM nodes c WHERE c.parent_id=nodes.id AND c.status='done'),created_at
              FROM nodes WHERE ?1 IS NULL OR instr(title,?1)>0 OR instr(COALESCE(note,''),?1)>0 ORDER BY depth,sort_order,id")?;
         Ok(stmt
             .query_map([keyword], |r| {
@@ -85,6 +86,7 @@ impl Service<'_> {
                     note: r.get(6)?,
                     due_at: r.get(7)?,
                     done_at: r.get(8)?,
+                    created_at: r.get(12)?,
                     version: r.get(9)?,
                     progress: match r.get::<_, u32>(10)? {
                         0 => None,
@@ -453,6 +455,7 @@ impl ProjectValidation {
                         note: note.clone(),
                         due_at: due_at.clone(),
                         done_at: None,
+                        created_at: svc.now_str(),
                         version: 1,
                         progress: None,
                     },

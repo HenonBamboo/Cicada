@@ -26,7 +26,7 @@ pub(super) async fn generate(
     let today = state
         .clock
         .business_date(crate::clock::parse_cutoff(&config.time.day_cutoff)?);
-    let system = prompts::render_single(
+    let mut system = prompts::render_single(
         &state.paths.prompts(),
         prompt,
         config,
@@ -34,6 +34,10 @@ pub(super) async fn generate(
         &today.to_string(),
         "只读总结",
     );
+    if prompt == PromptId::Greeting {
+        // 更新不改写用户提示词；界面格式与事实边界由程序补充。
+        system.push_str(super::greetings::COPY_RULES);
+    }
     let messages = [Message::User { text: context }];
     // 流式连接持续有心跳也必须结束，避免长期占用维护读锁阻塞数据恢复。
     let response = tokio::time::timeout(

@@ -61,8 +61,9 @@ export function submitInput(
   images: string[],
   requestId: string,
   replyTo?: string,
+  selectionToken?: string,
 ): Promise<Reply> {
-  return invoke<Reply>("submit_input", { text, mode, images, requestId, replyTo });
+  return invoke<Reply>("submit_input", { text, mode, images, requestId, replyTo, selectionToken });
 }
 
 export const confirmPending = (requestId: string) =>
@@ -124,6 +125,9 @@ export interface UiCopyView {
   taskEmpty: string;
   projectEmpty: string;
   generated: boolean;
+  taskExample: string;
+  projectExample: string;
+  generatedAt: string;
 }
 export const getUiCopy = () => invoke<UiCopyView>("get_ui_copy");
 export const onUiCopyChanged = (handler: (copy: UiCopyView) => void) =>
@@ -133,6 +137,16 @@ export interface UpdateView {
   notes: string;
   publishedAt: string;
 }
+export interface UpdateStatusView {
+  status: "idle" | "checking" | "upToDate" | "available" | "error";
+  checkedAt: string | null;
+  update: UpdateView | null;
+  error: string | null;
+}
+export const getUpdateStatus = () => invoke<UpdateStatusView>("get_update_status");
+export const checkUpdate = () => invoke<UpdateStatusView>("check_update");
+export const onUpdateStatus = (handler: (status: UpdateStatusView) => void) =>
+  listen<UpdateStatusView>("update-status", (e) => handler(e.payload));
 export const getUpdate = () => invoke<UpdateView | null>("get_update");
 export const installUpdate = () => invoke<void>("install_update");
 export const onUpdateAvailable = (handler: (update: UpdateView) => void) =>

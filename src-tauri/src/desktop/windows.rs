@@ -121,14 +121,31 @@ pub fn init(app: &AppHandle) -> AppResult<()> {
         });
     }
     with_service(&app.state::<AppState>(), |svc| svc.sticky_ensure_default())?;
-    let show = app
+    let show = !app
         .state::<AppState>()
         .config
         .lock()
         .map_err(poisoned)?
-        .desktop
-        .show_stickies_on_startup;
+        .show_main_on_startup();
     if show {
+        // 用户选择只显示便利贴时，至少保留一张可见便签作为入口。
+        with_service(&app.state::<AppState>(), |svc| {
+            let all = svc.stickies()?;
+            if !all.iter().any(|sticky| sticky.visible) {
+                if let Some(today) = all.iter().find(|sticky| sticky.kind == "today") {
+                    svc.sticky_update(
+                        today.id,
+                        StickyPatch {
+                            visible: Some(true),
+                            ..Default::default()
+                        },
+                    )?;
+                } else {
+                    svc.sticky_create("today", None)?;
+                }
+            }
+            Ok(())
+        })?;
         restore_stickies(app)?;
     } else {
         // 仅抑制本次启动显示，不覆盖每张便签原有的显示状态。

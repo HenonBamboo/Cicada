@@ -3,7 +3,7 @@
 use serde::Serialize;
 
 use super::{DATE_FMT, Service};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct TaskBrief {
@@ -11,6 +11,10 @@ pub struct TaskBrief {
     pub title: String,
     pub planned_date: String,
     pub status: String,
+    /// 给模型及确认区使用的可读定位；内部 id 不用于用户选择。
+    pub display_label: String,
+    pub created_at: String,
+    pub version: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub done_date: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -23,6 +27,8 @@ pub struct TaskBrief {
 
 #[derive(Debug, Clone, Default)]
 pub struct TaskFilter {
+    /// all / today / legacy / upcoming，与主界面未完成任务分区一致。
+    pub scope: Option<String>,
     /// open / done / all
     pub status: Option<String>,
     pub date_from: Option<String>,
@@ -32,6 +38,19 @@ pub struct TaskFilter {
 }
 
 pub const QUERY_LIMIT: i64 = 50;
+
+pub(crate) fn task_label(title: &str, planned_date: &str, remind_at: Option<&str>) -> String {
+    let mut parts = vec![format!("计划 {planned_date}")];
+    if let Some(reminder) = remind_at.filter(|r| !r.is_empty()) {
+        let time = if reminder.get(..10) == Some(planned_date) {
+            reminder.get(11..16).unwrap_or(reminder).to_string()
+        } else {
+            reminder.get(..16).unwrap_or(reminder).replace('T', " ")
+        };
+        parts.push(format!("{time} 提醒"));
+    }
+    format!("「{title}」（{}）", parts.join("，"))
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Summary {
@@ -56,10 +75,36 @@ impl Service<'_> {
     /// 按状态、日期范围（计划日期，已完成的按完成日期）、关键词查询任务
     pub fn query_tasks_brief(&self, f: &TaskFilter) -> AppResult<Vec<TaskBrief>> {
         let mut sql = String::from(
-            "SELECT id, title, planned_date, status, done_date, due_at, remind_at, note FROM tasks WHERE 1 = 1",
+            "SELECT id, title, planned_date, status, done_date, due_at, remind_at, note, created_at, version FROM tasks WHERE 1 = 1",
         );
         let mut args: Vec<String> = Vec::new();
         let status = f.status.as_deref().unwrap_or("all");
+        let scope = f.scope.as_deref().unwrap_or("all");
+        if !matches!(scope, "all" | "today" | "legacy" | "upcoming") {
+            return Err(AppError::Invalid(
+                "任务范围应为 all、today、legacy 或 upcoming".into(),
+            ));
+        }
+        if !matches!(status, "all" | "open" | "done") {
+            return Err(AppError::Invalid("任务状态应为 all、open 或 done".into()));
+        }
+        if scope != "all" {
+            if status == "done" {
+                return Err(AppError::Invalid(
+                    "今日、遗留和之后分区仅包含未完成任务；查询完成记录请使用 all 范围".into(),
+                ));
+            }
+            args.push(self.today().format(DATE_FMT).to_string());
+            let comparison = match scope {
+                "today" => "=",
+                "legacy" => "<",
+                _ => ">",
+            };
+            sql.push_str(&format!(
+                " AND status = 'open' AND planned_date {comparison} ?{}",
+                args.len()
+            ));
+        }
         match status {
             "open" => sql.push_str(" AND status = 'open'"),
             "done" => sql.push_str(" AND status = 'done'"),
@@ -95,15 +140,21 @@ impl Service<'_> {
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(args.iter()), |r| {
+                let title: String = r.get(1)?;
+                let planned_date: String = r.get(2)?;
+                let remind_at: Option<String> = r.get(6)?;
                 Ok(TaskBrief {
                     id: r.get(0)?,
-                    title: r.get(1)?,
-                    planned_date: r.get(2)?,
+                    display_label: task_label(&title, &planned_date, remind_at.as_deref()),
+                    title,
+                    planned_date,
                     status: r.get(3)?,
                     done_date: r.get(4)?,
                     due_at: r.get(5)?,
-                    remind_at: r.get(6)?,
+                    remind_at,
                     note: r.get(7)?,
+                    created_at: r.get(8)?,
+                    version: r.get(9)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -164,6 +215,46 @@ mod tests {
     use super::*;
     use crate::config::AppConfig;
     use rusqlite::params;
+
+    #[test]
+    fn 分区使用业务日期且不包含已完成任务() {
+        let conn = db();
+        let clock = clock("2026-10-21 03:00:00");
+        let mut config = AppConfig::default();
+        config.time.day_cutoff = "04:00".into();
+        let svc = Service::new(&conn, &clock, &config).unwrap();
+        for date in ["2026-10-19", "2026-10-20", "2026-10-21"] {
+            conn.execute("INSERT INTO tasks (title,planned_date,created_at,updated_at) VALUES ('读论文',?1,'x','x')", [date]).unwrap();
+        }
+        conn.execute("INSERT INTO tasks (title,planned_date,status,done_at,done_date,created_at,updated_at) VALUES ('已完成','2026-10-19','done','2026-10-20T10:00:00','2026-10-20','x','x')", []).unwrap();
+        for (scope, date) in [
+            ("legacy", "2026-10-19"),
+            ("today", "2026-10-20"),
+            ("upcoming", "2026-10-21"),
+        ] {
+            let rows = svc
+                .query_tasks_brief(&TaskFilter {
+                    scope: Some(scope.into()),
+                    ..Default::default()
+                })
+                .unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].planned_date, date);
+            assert!(rows[0].display_label.contains(date));
+        }
+        assert_eq!(
+            svc.query_tasks_brief(&TaskFilter::default()).unwrap().len(),
+            4
+        );
+        assert!(
+            svc.query_tasks_brief(&TaskFilter {
+                scope: Some("legacy".into()),
+                status: Some("done".into()),
+                ..Default::default()
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn 按状态日期关键词查询() {

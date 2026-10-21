@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub fn spawn_automation(app: AppHandle) {
+    app.manage(super::CopyWake(tokio::sync::Notify::new()));
     let local_app = app.clone();
     tauri::async_runtime::spawn(async move {
         let mut startup = true;
@@ -20,7 +21,10 @@ pub fn spawn_automation(app: AppHandle) {
         let mut report_retry = Instant::now();
         loop {
             let state = app.state::<AppState>();
-            if let Ok(greeting) = super::greetings::get(&state).await {
+            let visible = app.get_webview_window("main").is_some_and(|w| {
+                w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
+            });
+            if visible && let Ok(greeting) = super::greetings::get(&state).await {
                 let _ = app.emit("greeting-changed", &greeting);
                 let _ = app.emit(
                     "ui-copy-changed",
@@ -37,7 +41,13 @@ pub fn spawn_automation(app: AppHandle) {
                     Err(_) => report_retry = Instant::now() + Duration::from_secs(15 * 60),
                 }
             }
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            let wake = app.state::<super::CopyWake>();
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(60)) => {},
+                _ = wake.0.notified() => {
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
         }
     });
 }

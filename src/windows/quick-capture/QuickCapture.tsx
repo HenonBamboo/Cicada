@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import { hideQuick, onDesktopFocus, onQuickOpened } from "../../lib/desktop";
 import { useCapture } from "../../lib/useCapture";
 import { useUiCopy } from "../../lib/useUiCopy";
+import { useInputExample } from "../../lib/useInputExample";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
-import { isModeShortcut } from "../../lib/keys";
+import { canAdoptExample, isModeShortcut } from "../../lib/keys";
 import "./quick.css";
 
 export function QuickCapture() {
@@ -11,6 +12,11 @@ export function QuickCapture() {
   const appearanceError = useDesktopAppearance();
   const capture = useCapture("quick");
   const copy = useUiCopy();
+  const example = useInputExample(
+    copy,
+    capture.mode,
+    capture.busy || !!capture.text.length || !!capture.images.length,
+  );
   const setCaptureError = capture.setError;
   useEffect(() => {
     const focus = () => input.current?.focus();
@@ -41,7 +47,7 @@ export function QuickCapture() {
           disabled={capture.busy}
           autoComplete="off"
           maxLength={20_000}
-          placeholder={capture.mode === "task" ? copy.taskPlaceholder : copy.projectPlaceholder}
+          placeholder={example.placeholder}
           onChange={(event) => capture.setText(event.target.value)}
           onPaste={capture.paste}
           onKeyDown={(event) => {
@@ -49,6 +55,17 @@ export function QuickCapture() {
             if (isModeShortcut(event)) {
               event.preventDefault();
               capture.setMode(capture.mode === "task" ? "project" : "task");
+            } else if (
+              canAdoptExample(
+                event,
+                capture.text,
+                capture.images.length,
+                capture.busy,
+                example.example,
+              )
+            ) {
+              event.preventDefault();
+              capture.setText(example.example);
             } else if (event.key === "Enter" && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void capture.send();
@@ -75,7 +92,7 @@ export function QuickCapture() {
       </div>
       <div className="cap-hint">
         <span>
-          <kbd>Enter</kbd> 记下 · <kbd>Tab</kbd> 切换任务/项目 · <kbd>Ctrl+V</kbd> 粘贴截图
+          <kbd>Enter</kbd> 记下 · <kbd>Ctrl+Tab</kbd> 切换 · <kbd>Ctrl+V</kbd> 粘贴截图
         </span>
         <span>
           <kbd>Esc</kbd> 取消

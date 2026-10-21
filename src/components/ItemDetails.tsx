@@ -1,39 +1,72 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { MarkdownBlock } from "../lib/markdown";
+import type { ItemDescription } from "../lib/nodePresentation";
 
 interface Detail {
   anchor: HTMLElement;
-  content: string;
+  content: ItemDescription;
 }
 
-/** 共用悬停详情；使用 portal 避免任务面板和树视图裁剪，浮层不接收鼠标操作。 */
+/** 共用悬停详情；使用 portal 避免列表裁剪，允许移入查看长备注。 */
 export function ItemDetails() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const active = useRef<HTMLElement | null>(null);
   const popup = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    let hideTimer: number | undefined;
+    const keep = () => window.clearTimeout(hideTimer);
     const hide = () => {
+      keep();
       active.current = null;
       setDetail(null);
     };
+    const scheduleHide = () => {
+      keep();
+      hideTimer = window.setTimeout(hide, 160);
+    };
+    const inPopup = (target: EventTarget | null) =>
+      target instanceof Node && !!popup.current?.contains(target);
     const anchorFor = (target: EventTarget | null) =>
       target instanceof Element ? target.closest<HTMLElement>("[data-item-details]") : null;
     const show = (event: Event) => {
-      const anchor = anchorFor(event.target);
-      if (!anchor) {
-        hide();
+      if (inPopup(event.target)) {
+        keep();
         return;
       }
+      const anchor = anchorFor(event.target);
+      if (!anchor || anchor.closest('[inert], [aria-hidden="true"]')) {
+        scheduleHide();
+        return;
+      }
+      keep();
       if (active.current === anchor) return;
-      const content = anchor.dataset.itemDetails;
-      if (!content) return;
-      active.current = anchor;
-      setDetail({ anchor, content });
+      try {
+        const content: ItemDescription = JSON.parse(anchor.dataset.itemDetails || "null");
+        if (
+          !content ||
+          typeof content.title !== "string" ||
+          !Array.isArray(content.lines) ||
+          !content.lines.every((line) => typeof line === "string") ||
+          (content.note !== null && typeof content.note !== "string")
+        )
+          return;
+        active.current = anchor;
+        setDetail({ anchor, content });
+      } catch {
+        hide();
+      }
     };
     const leave = (event: PointerEvent | FocusEvent) => {
-      if (event.relatedTarget instanceof Node && active.current?.contains(event.relatedTarget))
+      if (
+        event.relatedTarget instanceof Node &&
+        (active.current?.contains(event.relatedTarget) || inPopup(event.relatedTarget))
+      )
         return;
-      hide();
+      scheduleHide();
+    };
+    const outside = (event: Event) => {
+      if (!inPopup(event.target)) hide();
     };
     const key = (event: KeyboardEvent) => {
       if (event.key === "Escape") hide();
@@ -42,9 +75,9 @@ export function ItemDetails() {
     document.addEventListener("pointerout", leave);
     document.addEventListener("focusin", show);
     document.addEventListener("focusout", leave);
-    document.addEventListener("pointerdown", hide);
+    document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", key);
-    document.addEventListener("scroll", hide, true);
+    document.addEventListener("scroll", outside, true);
     window.addEventListener("resize", hide);
     window.addEventListener("blur", hide);
     return () => {
@@ -52,13 +85,39 @@ export function ItemDetails() {
       document.removeEventListener("pointerout", leave);
       document.removeEventListener("focusin", show);
       document.removeEventListener("focusout", leave);
-      document.removeEventListener("pointerdown", hide);
+      keep();
+      document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", key);
-      document.removeEventListener("scroll", hide, true);
+      document.removeEventListener("scroll", outside, true);
       window.removeEventListener("resize", hide);
       window.removeEventListener("blur", hide);
     };
   }, []);
+  useEffect(() => {
+    if (!detail) return;
+    // 仅详情打开时观察页面切换和条目移除，不为隐藏页面保留 portal。
+    let alive = true;
+    const validate = () => {
+      if (!alive || active.current !== detail.anchor) return;
+      if (!detail.anchor.isConnected || detail.anchor.closest('[inert], [aria-hidden="true"]')) {
+        active.current = null;
+        setDetail(null);
+      }
+    };
+    const observer = new MutationObserver(validate);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["inert", "aria-hidden"],
+    });
+    // 条目可能在 pointerover 后、此次 effect 安装前已经被移除。
+    queueMicrotask(validate);
+    return () => {
+      alive = false;
+      observer.disconnect();
+    };
+  }, [detail]);
   useLayoutEffect(() => {
     if (!detail || !popup.current) return;
     const element = popup.current;
@@ -75,7 +134,7 @@ export function ItemDetails() {
     element.style.visibility = "visible";
   }, [detail]);
   if (!detail) return null;
-  const [name, ...lines] = detail.content.split("\n");
+  const { title, lines, note } = detail.content;
   return createPortal(
     <div
       ref={popup}
@@ -83,8 +142,13 @@ export function ItemDetails() {
       role="tooltip"
       style={{ visibility: "hidden" }}
     >
-      <strong>{name}</strong>
+      <strong className="item-details-title">{title}</strong>
       <div>{lines.join("\n")}</div>
+      {note && (
+        <div className="item-details-note">
+          <MarkdownBlock text={note} />
+        </div>
+      )}
     </div>,
     document.body,
   );

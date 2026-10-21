@@ -45,6 +45,7 @@ pub(crate) fn with_service<T>(
 pub(crate) fn notify_changes(app: &AppHandle, changes: &ChangeSet) {
     if !changes.tasks.is_empty() || !changes.nodes.is_empty() {
         let _ = app.emit(EVENT_DATA_CHANGED, changes);
+        crate::scheduler::wake_copy(app);
     }
 }
 

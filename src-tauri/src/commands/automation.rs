@@ -6,7 +6,11 @@ use crate::state::AppState;
 use tauri::State;
 
 #[tauri::command]
-pub fn get_ui_copy(state: State<'_, AppState>) -> AppResult<greetings::UiCopyView> {
+pub fn get_ui_copy(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> AppResult<greetings::UiCopyView> {
+    crate::scheduler::wake_copy(&app);
     let _guard = state
         .maintenance
         .try_read()
