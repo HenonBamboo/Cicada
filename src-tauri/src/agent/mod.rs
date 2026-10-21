@@ -641,6 +641,21 @@ async fn run(
 
     let (mut messages, mut plan, mut checklist, mut reads) = match resume {
         Some((mut c, answer, selection)) => {
+            if c.reads.has_unbound_selection()
+                || c.entity_options
+                    .iter()
+                    .any(|option| option.intent_id.is_empty())
+                || selection
+                    .as_ref()
+                    .is_some_and(|option| c.checklist.selection_intent(&option.intent_id).is_err())
+            {
+                return fail(
+                    ctx,
+                    id,
+                    &item.image_paths,
+                    "旧版暂存选择缺少原意图关联，没有执行任何改动，请重新输入完整要求。",
+                );
+            }
             if !c.plan.is_empty() {
                 let current = ctx.svc(|s| s.plan_snapshots(&c.pins));
                 if !c
@@ -671,8 +686,15 @@ async fn run(
                         "选项中的内容已经变化，没有执行任何改动，请重新查询后选择。",
                     );
                 }
-                c.checklist.selection_context(&answer);
-                c.reads.select(&choice.targets);
+                if let Err(error) = c.checklist.selection_context(&choice.intent_id, &answer) {
+                    return fail(
+                        ctx,
+                        id,
+                        &item.image_paths,
+                        &format!("{error}，没有执行任何改动。"),
+                    );
+                }
+                c.reads.select(&choice.intent_id, &choice.targets);
             }
             if !c.source.is_empty() {
                 intent_source = c.source;
@@ -685,7 +707,8 @@ async fn run(
                 content: match selection {
                     Some(choice) => serde_json::json!({
                         "answer": answer, "selectedTargets": choice.targets,
-                        "instruction": "这些是用户明确选择的实体。选择文字已登记为context；不要重新创建意图或重新执行旧操作，仍须查询当前状态后继续原write意图。"
+                        "intent_id": choice.intent_id,
+                        "instruction": "这些是用户为此原意图明确选择的实体，只限定该 intent_id；其它独立意图继续各自处理。选择文字已登记为context；不要重新创建或改绑原意图，不要重新执行旧操作，仍须查询当前状态后继续原意图。"
                     }).to_string(),
                     None => format!("用户回答：{answer}\n程序提示：用 intent_checklist(append=true) 只补充本次回答的原文意图，已登记的原始要求会保留；新增独立操作不能标为context。"),
                 },
@@ -832,7 +855,7 @@ async fn run(
                 }
                 Ok(call) if call.name == "report_get" => report_tools::handle(ctx, &call),
                 Ok(call) if call.name == "ask_clarify" => {
-                    ctx.svc(|s| Ok(clarify::handle(s, &call, &reads)))?
+                    ctx.svc(|s| Ok(clarify::handle(s, &call, &reads, &checklist)))?
                 }
                 Ok(call) => ctx.svc(|s| {
                     Ok(tools::handle_mode(

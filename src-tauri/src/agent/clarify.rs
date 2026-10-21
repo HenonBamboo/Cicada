@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{
-    intent::ReadScope,
+    intent::{IntentChecklist, ReadScope},
     reply::EntityOption,
     tools::{self, Outcome},
 };
@@ -20,6 +20,8 @@ pub(super) struct Target {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingOption {
+    #[serde(default)]
+    pub(super) intent_id: String,
     pub(super) value: String,
     pub(super) label: String,
     pub(super) targets: Vec<Target>,
@@ -184,6 +186,7 @@ fn options(
     svc: &Service<'_>,
     args: &Value,
     reads: &ReadScope,
+    checklist: &IntentChecklist,
 ) -> Result<Vec<PendingOption>, String> {
     let Some(raw) = args.get("entity_options") else {
         return Ok(vec![]);
@@ -195,6 +198,10 @@ fn options(
         .as_array()
         .filter(|a| !a.is_empty() && a.len() <= 5)
         .ok_or("entity_options 需要1到5个实体选项")?;
+    let intent_id = tools::s(args, "intent_id")
+        .filter(|id| !id.is_empty())
+        .ok_or("实体追问需要原 intent_id，不能将选择作用于整轮其它要求")?;
+    checklist.selection_intent(&intent_id)?;
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for choice in choices {
@@ -268,6 +275,7 @@ fn options(
             return Err("实体选项不能重复".into());
         }
         result.push(PendingOption {
+            intent_id: intent_id.clone(),
             value: uuid::Uuid::new_v4().to_string(),
             label: labels.join("；"),
             targets: selected,
@@ -310,11 +318,16 @@ fn options(
     Ok(result)
 }
 
-pub(super) fn handle(svc: &Service<'_>, call: &ToolCall, reads: &ReadScope) -> Outcome {
+pub(super) fn handle(
+    svc: &Service<'_>,
+    call: &ToolCall,
+    reads: &ReadScope,
+    checklist: &IntentChecklist,
+) -> Outcome {
     let Some(args) = call.arguments.as_ref() else {
         return Outcome::Error("追问需要JSON参数".into());
     };
-    let choices = match options(svc, args, reads) {
+    let choices = match options(svc, args, reads, checklist) {
         Ok(choices) => choices,
         Err(error) => return Outcome::Error(error),
     };

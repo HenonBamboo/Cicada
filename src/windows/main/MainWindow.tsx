@@ -20,6 +20,7 @@ import {
   getUpdate,
   installUpdate,
   onUpdateAvailable,
+  onUpdateStatus,
   listReports,
   readReport,
   setTaskDone,
@@ -30,6 +31,7 @@ import type { Mode, TaskView } from "../../lib/types";
 import { useBoard } from "../../lib/useBoard";
 import { useAppState } from "../../theme/useAppState";
 import { useAgent } from "../../lib/useAgent";
+import { useInputNavigation } from "../../lib/useInputNavigation";
 import { InboxList } from "../../components/InboxList";
 import { Settings } from "../../components/Settings";
 import { Icon } from "../../components/Icon";
@@ -60,6 +62,7 @@ function SettingsTransition({ children, duration }: { children: ReactNode; durat
 }
 
 export function MainWindow() {
+  useInputNavigation();
   const reduceMotion = useReducedMotion();
   const { state: app, error: appError } = useAppState();
   const { board, heat, error, flash, reload } = useBoard();
@@ -85,6 +88,12 @@ export function MainWindow() {
       if (alive) setUpdate(value);
     };
     const off = onUpdateAvailable(available);
+    const statusOff = onUpdateStatus((value) => {
+      if (value.status === "upToDate") {
+        eventReceived = true;
+        if (alive) setUpdate(null);
+      }
+    });
     void getUpdate()
       .then((value) => {
         if (alive && !eventReceived) setUpdate(value);
@@ -93,6 +102,7 @@ export function MainWindow() {
     return () => {
       alive = false;
       void off.then((stop) => stop());
+      void statusOff.then((stop) => stop());
     };
   }, []);
   const updateNow = async () => {
@@ -320,6 +330,7 @@ export function MainWindow() {
                   onboarding={onboarding}
                   onModelSaved={onboarding ? tryFirstMessage : undefined}
                   onInstallUpdate={() => void updateNow()}
+                  onClearUpdateError={() => setUpdateError(null)}
                   updating={updating}
                   updateError={updateError}
                 />

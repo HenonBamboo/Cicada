@@ -5,9 +5,11 @@ import { useUiCopy } from "../../lib/useUiCopy";
 import { useInputExample } from "../../lib/useInputExample";
 import { useDesktopAppearance } from "../../lib/useDesktopAppearance";
 import { canAdoptExample, isModeShortcut } from "../../lib/keys";
+import { useInputNavigation } from "../../lib/useInputNavigation";
 import "./quick.css";
 
 export function QuickCapture() {
+  useInputNavigation();
   const input = useRef<HTMLInputElement>(null);
   const appearanceError = useDesktopAppearance();
   const capture = useCapture("quick");

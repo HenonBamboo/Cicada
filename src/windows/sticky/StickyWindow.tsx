@@ -17,6 +17,7 @@ import {
 } from "../../lib/desktop";
 import { monthDay, timeOf } from "../../lib/dates";
 import { canAdoptExample, isModeShortcut } from "../../lib/keys";
+import { useInputNavigation } from "../../lib/useInputNavigation";
 import { MarkdownInline, markdownToPlainText } from "../../lib/markdown";
 import type { ProjectNode, TaskView } from "../../lib/types";
 import { useCapture } from "../../lib/useCapture";
@@ -90,6 +91,7 @@ function Task({
   );
 }
 export function StickyWindow() {
+  useInputNavigation();
   const appearanceError = useDesktopAppearance();
   const [state, setState] = useState<StickyState | null>(null);
   const [board, setBoard] = useState<StickyBoard | null>(null);

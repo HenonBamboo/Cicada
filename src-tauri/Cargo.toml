@@ -1,6 +1,6 @@
 [package]
 name = "cicada"
-version = "0.2.3"
+version = "0.2.4"
 description = "知了：你只管说，它来整理"
 authors = ["HenonBamboo"]
 license = "AGPL-3.0-only"

@@ -16,7 +16,7 @@ pub(super) const INSTRUCTIONS: &str = r#"
 - 每个 Markdown 列表项、标题层次、日期、提醒、备注和条件都要保留。title 使用纯文本；详细说明、清单、链接放入 note 并保留 Markdown。连续动作中的对象和目的不能随意拆开，例如“联系崔所长进行调度对接”是一个节点。
 - 有遗漏或匹配歧义时先补齐工具调用或 ask_clarify。全部写入会统一提交；不要在工具成功前声称已经执行。回复使用名称和项目路径，不向用户报内部 id 或 $ 引用。
 - “今日”“遗留”“之后”分别用 task_query(scope=today/legacy/upcoming)，它们都是未完成任务分区；遗留的计划日期严格早于业务今天，不含今天。用户已明确集合且查询数量相符时直接处理该集合，删除确认由程序负责，不要再让用户从全部未完成任务中选择。
-- 查询回复使用任务的 display_label（标题、计划日期及提醒时间），节点使用项目路径。不能写“第4条”“编号6”等内部定位。实体有歧义时 ask_clarify 用 entity_options.targets（kind=task/node、id=当前查询标识），由程序生成可读选项；普通 options 只用于日期等非实体问题。
+- 查询回复使用任务的 display_label（标题、计划日期及提醒时间），节点使用项目路径。不能写“第4条”“编号6”等内部定位。实体有歧义时 ask_clarify 必须带被追问的原 intent_id，并用 entity_options.targets（kind=task/node、id=当前查询标识），由程序生成可读选项；该选择只限定对应意图，不能改绑为其它意图或影响独立要求。普通 options 只用于日期等非实体问题。
 - 追问后的自由文本回答也是本轮新增原文。使用 intent_checklist(append=true) 只追加回答中的要求或 context，不要反复重抄已保存的清单；新增独立要求仍必须列为 write/query，不能伪装为 context。程序已登记的实体选择 context 无需重复登记。回答后仍须查询当前状态，再关联原有 write 意图执行。
 "#;
 
@@ -27,6 +27,8 @@ pub(super) struct IntentChecklist {
     operation_intents: Vec<String>,
     #[serde(default)]
     write_attempted: bool,
+    #[serde(default)]
+    selection_intents: HashSet<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +52,8 @@ pub(super) struct ReadScope {
     rows: HashMap<String, Value>,
     #[serde(default)]
     selected: Vec<super::clarify::Target>,
+    #[serde(default)]
+    selected_by_intent: HashMap<String, Vec<super::clarify::Target>>,
 }
 
 /// 同一个校验错误反复出现时及时止损；不把模型协议失败归咎于用户操作过多。
@@ -176,12 +180,12 @@ impl IntentChecklist {
                 item.resolution = previous.resolution.clone();
             }
         }
-        for owner in &self.operation_intents {
+        for owner in self.operation_intents.iter().chain(&self.selection_intents) {
             let old = self.items.iter().find(|item| item.id == *owner).unwrap();
             if !items.iter().any(|item| {
                 item.id == old.id && item.excerpt == old.excerpt && item.kind == old.kind
             }) {
-                return Err("已有操作关联的意图不能删除或改写；补充回答只能追加新意图，必要时通过修改工具调整本轮新建项。".into());
+                return Err("已有操作或实体选择关联的意图不能删除或改写；补充回答只能追加新意图，必要时通过修改工具调整本轮新建项。".into());
             }
         }
         let missing = missing_source(&items, source);
@@ -198,7 +202,24 @@ impl IntentChecklist {
     }
 
     /// 只供经过一次性选项校验的实体选择调用；普通文本不能跳过原文覆盖。
-    pub(super) fn selection_context(&mut self, label: &str) {
+    pub(super) fn selection_intent(&self, id: &str) -> Result<(), String> {
+        if self
+            .items
+            .iter()
+            .any(|item| item.id == id && matches!(item.kind.as_str(), "write" | "query"))
+        {
+            Ok(())
+        } else {
+            Err(
+                "实体追问必须关联已登记的 write 或 query 意图，请先列全清单并传入原 intent_id"
+                    .into(),
+            )
+        }
+    }
+
+    pub(super) fn selection_context(&mut self, intent_id: &str, label: &str) -> Result<(), String> {
+        self.selection_intent(intent_id)?;
+        self.selection_intents.insert(intent_id.to_string());
         self.items.push(IntentItem {
             id: format!("s-{}", uuid::Uuid::new_v4().simple()),
             excerpt: label.to_string(),
@@ -206,6 +227,7 @@ impl IntentChecklist {
             handled: true,
             resolution: None,
         });
+        Ok(())
     }
 
     pub(super) fn prepare(
@@ -233,7 +255,7 @@ impl IntentChecklist {
         if !self.items.iter().any(|i| i.id == id && i.kind == "write") {
             return Err("intent_id 不是已登记的 write 意图；请先列全意图清单".into());
         }
-        reads.validate(call)?;
+        reads.validate(call, id)?;
         let mut stripped = call.clone();
         stripped
             .arguments
@@ -383,10 +405,18 @@ impl ReadScope {
         self
     }
 
-    pub(super) fn select(&mut self, targets: &[super::clarify::Target]) {
+    pub(super) fn has_unbound_selection(&self) -> bool {
+        !self.selected.is_empty()
+    }
+
+    pub(super) fn select(&mut self, intent_id: &str, targets: &[super::clarify::Target]) {
+        let selected = self
+            .selected_by_intent
+            .entry(intent_id.to_string())
+            .or_default();
         for target in targets {
-            if !self.selected.contains(target) {
-                self.selected.push(target.clone());
+            if !selected.contains(target) {
+                selected.push(target.clone());
             }
         }
     }
@@ -446,7 +476,7 @@ impl ReadScope {
         }
     }
 
-    fn validate(&self, call: &ToolCall) -> Result<(), String> {
+    fn validate(&self, call: &ToolCall, intent_id: &str) -> Result<(), String> {
         let args = call.arguments.as_ref().unwrap();
         let (scope, keys, query): (&HashSet<i64>, &[&str], &str) = match call.name.as_str() {
             "task_update" | "task_delete" | "task_set_done" => (&self.tasks, &["id"], "task_query"),
@@ -483,9 +513,9 @@ impl ReadScope {
                     } else {
                         "rule"
                     };
-                    if self.selected.iter().any(|target| target.kind == kind)
-                        && !self
-                            .selected
+                    if let Some(selected) = self.selected_by_intent.get(intent_id)
+                        && selected.iter().any(|target| target.kind == kind)
+                        && !selected
                             .iter()
                             .any(|target| target.kind == kind && Some(target.id) == id)
                     {
@@ -551,8 +581,42 @@ mod tests {
             arguments: Some(json!({"id":"12","parent_id":"20"})),
         };
         let mut reads = ReadScope::default();
-        assert!(reads.validate(&call).is_err());
+        assert!(reads.validate(&call, "move").is_err());
         reads.observe("project_query", r#"{"nodes":[{"id":12},{"id":20}]}"#);
-        assert!(reads.validate(&call).is_ok());
+        assert!(reads.validate(&call, "move").is_ok());
+    }
+
+    #[test]
+    fn 已选择的原意图不能改名绕过范围() {
+        let mut checklist = IntentChecklist::default();
+        checklist
+            .declare(
+                Some(&json!({"items":[
+                    {"id":"del","excerpt":"删除论文","kind":"write"}
+                ]})),
+                "删除论文",
+                0,
+            )
+            .unwrap();
+        assert!(checklist.selection_intent("missing").is_err());
+        checklist.selection_context("del", "论文（昨天）").unwrap();
+        assert!(
+            checklist
+                .declare(
+                    Some(&json!({"items":[
+                        {"id":"other","excerpt":"删除论文","kind":"write"},
+                        {"id":"answer","excerpt":"论文（昨天）","kind":"context"}
+                    ]})),
+                    "删除论文\n论文（昨天）",
+                    0
+                )
+                .is_err()
+        );
+        let legacy: ReadScope = serde_json::from_value(json!({
+            "tasks":[],"nodes":[],"rules":[],"any_query":false,
+            "selected":[{"kind":"task","id":1}]
+        }))
+        .unwrap();
+        assert!(legacy.has_unbound_selection());
     }
 }

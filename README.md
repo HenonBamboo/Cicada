@@ -8,7 +8,7 @@
 一个安静地待在 Windows 桌面的个人任务与项目助手。<br>
 用自然语言记事、安排任务、推进项目和回顾完成情况，不必反复打开表单整理字段。
 
-[![Version](https://img.shields.io/badge/version-0.2.3-287f73?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.4-287f73?style=flat-square)](CHANGELOG.md)
 [![Windows 11](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square&logo=windows11)](#下载与使用)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--only-1f4733?style=flat-square)](LICENSE)
@@ -63,11 +63,11 @@
 
 ## 下载与使用
 
-知了 `0.2.3` 提供 **Windows 11 x64** 无需安装的直接运行 EXE。
+知了 `0.2.4` 提供 **Windows 11 x64** 无需安装的直接运行 EXE。
 
-从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.3-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
+从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.4-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
 
-**从 0.2.2 及更早版本升级：** 本版更换了更新签名密钥，请先退出旧程序，手动下载新版覆盖原 EXE。数据和自定义提示词会保留；从 0.2.3 起，后续版本继续支持应用内更新。
+**从 0.2.2 及更早版本升级：** 0.2.3 起使用新的更新签名密钥，请先退出旧程序，手动下载新版覆盖原 EXE。数据和自定义提示词会保留；0.2.3 及后续版本支持应用内更新。
 
 运行前请确认系统已安装 Microsoft Edge WebView2 Runtime。当前 EXE 没有 Windows 代码签名，首次启动时可能显示来源提示；请从上述 Releases 下载并核对同版本的 `SHA256SUMS`。应用内更新另有独立的签名校验。
 
@@ -87,6 +87,7 @@ Base URL 支持 HTTP 和 HTTPS。HTTP 会明文传输请求内容和 API Key，�
 | 显示 / 隐藏主窗口   | `Ctrl+Alt+Z`                        |
 | 显示 / 隐藏便利贴   | `Ctrl+Alt+S`                        |
 | 采用输入示例        | 空输入框按 `Tab`，填入后需发送      |
+| 正向焦点导航        | `Shift+Tab`                         |
 | 切换任务 / 项目模式 | `Ctrl+Tab`                          |
 | 发送 / 换行         | `Enter` / `Shift+Enter`             |
 | 浏览之前的输入      | `↑` / `↓`；多行内容仅在首尾边界生效 |

@@ -128,6 +128,7 @@ pub fn specs() -> Vec<ToolSpec> {
             "向用户追问。匹配到多条或信息不全时使用，不要猜。调用后本轮结束，等用户回答。",
             json!({
                 "question": { "type": "string", "description": "简短的问题" },
+                "intent_id": { "type": "string", "description": "实体选择必填：被追问的已登记 write/query 意图 id，选择仅限定此原意图" },
                 "options": { "type": "array", "items": { "type": "string" }, "description": "非实体的普通回答选项，最多5个；不能用内部编号指代任务或节点" },
                 "entity_options": { "type": "array", "maxItems": 5, "description": "选择任务/节点时使用，程序按当前查询结果生成名称、日期等可读标签，不能用裸编号让用户选择", "items": {"type":"object","properties":{
                     "targets":{"type":"array","minItems":1,"maxItems":50,"items":{"type":"object","properties":{

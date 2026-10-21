@@ -139,6 +139,7 @@ export function Settings({
   onModelSaved,
   onboarding = false,
   onInstallUpdate,
+  onClearUpdateError,
   updating = false,
   updateError = null,
 }: {
@@ -147,6 +148,7 @@ export function Settings({
   onModelSaved?: () => void;
   onboarding?: boolean;
   onInstallUpdate?: () => void;
+  onClearUpdateError?: () => void;
   updating?: boolean;
   updateError?: string | null;
 }) {
@@ -186,6 +188,7 @@ export function Settings({
   }, []);
   const checkForUpdate = async () => {
     if (checkingUpdate || updating) return;
+    onClearUpdateError?.();
     setCheckingUpdate(true);
     setCheckError("");
     try {
