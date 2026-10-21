@@ -17,5 +17,5 @@ export function useInputExample(copy: ExampleCopy, mode: Mode, frozen: boolean) 
   const placeholder = mode === "task" ? current.taskPlaceholder : current.projectPlaceholder;
   const example = mode === "task" ? current.taskExample : current.projectExample;
   const body = exampleBody(example || placeholder);
-  return { placeholder: !frozen && body ? `「Tab」 ${placeholder}` : placeholder, example: body };
+  return { placeholder: !frozen && body ? `「Tab」 ${body}` : body, example: body };
 }
