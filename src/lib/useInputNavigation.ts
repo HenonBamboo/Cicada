@@ -8,7 +8,7 @@ export function useInputNavigation() {
       if (isExampleShortcut(event)) event.preventDefault();
       if (isForwardFocusShortcut(event)) {
         event.preventDefault();
-        if (document.activeElement) moveFocusForward(document.activeElement);
+        if (!event.isComposing && document.activeElement) moveFocusForward(document.activeElement);
       }
     };
     document.addEventListener("keydown", navigate, true);

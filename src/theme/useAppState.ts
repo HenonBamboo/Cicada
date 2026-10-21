@@ -21,10 +21,13 @@ export function useAppState() {
   }, []);
 
   // 外观应用后（或启动失败时）再显示窗口
-  const ready = state !== null || error !== null;
+  const bootstrapReady = state !== null;
+  const ready = bootstrapReady || error !== null;
   useEffect(() => {
-    if (ready) requestAnimationFrame(() => void windowReady());
-  }, [ready]);
+    if (!ready) return;
+    const frame = requestAnimationFrame(() => void windowReady(bootstrapReady));
+    return () => cancelAnimationFrame(frame);
+  }, [ready, bootstrapReady]);
 
   useEffect(() => {
     if (!state) return;

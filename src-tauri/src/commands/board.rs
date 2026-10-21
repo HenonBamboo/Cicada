@@ -202,11 +202,13 @@ pub fn set_appearance(
     Ok(config)
 }
 
-/// 前端渲染好第一帧后再显示主窗口，避免白屏闪烁
+/// 错误首帧也可显示，但只有启动信息读取成功才确认升级成功。
 #[tauri::command]
-pub fn window_ready(window: tauri::WebviewWindow) -> AppResult<()> {
+pub fn window_ready(window: tauri::WebviewWindow, bootstrap_ready: bool) -> AppResult<()> {
     if window.label() == "main" {
-        crate::updater::mark_ready();
+        if bootstrap_ready {
+            crate::updater::mark_ready();
+        }
         if !window
             .state::<AppState>()
             .config

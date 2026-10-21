@@ -32,9 +32,9 @@ export function setAppearance(appearance: Appearance): Promise<AppConfig> {
   return invoke<AppConfig>("set_appearance", { appearance });
 }
 
-/** 首帧渲染完成后通知 Rust 显示窗口，避免启动白屏 */
-export function windowReady(): Promise<void> {
-  return invoke("window_ready");
+/** 首帧可显示；只有启动信息读取成功才能确认升级成功。 */
+export function windowReady(bootstrapReady: boolean): Promise<void> {
+  return invoke("window_ready", { bootstrapReady });
 }
 
 export function getBoard(): Promise<Board> {

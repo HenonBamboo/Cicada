@@ -27,6 +27,7 @@ impl TokenUsage {
     }
 }
 
+#[derive(Clone, Copy)]
 pub struct UsageContext<'a> {
     pub db: &'a Mutex<Connection>,
     pub clock: &'a dyn Clock,
@@ -66,17 +67,15 @@ impl<'a> UsageContext<'a> {
 }
 
 impl UsageAttempt<'_> {
-    /// 流式协议可能先返回输入、稍后返回累计输出；按字段替换，不逐块相加。
+    /// 接收适配层组装的完整快照，缺失字段不能沿用上一个快照的旧值。
     pub fn observe(&self, snapshot: TokenUsage) {
         if let Ok(mut usage) = self.usage.lock() {
-            fn replace(target: &mut Option<u64>, incoming: Option<u64>) {
-                if let Some(value) = incoming {
-                    *target = (value <= i64::MAX as u64).then_some(value);
-                }
-            }
-            replace(&mut usage.input_tokens, snapshot.input_tokens);
-            replace(&mut usage.output_tokens, snapshot.output_tokens);
-            replace(&mut usage.total_tokens, snapshot.total_tokens);
+            let valid = |v: Option<u64>| v.filter(|n| *n <= i64::MAX as u64);
+            *usage = TokenUsage {
+                input_tokens: valid(snapshot.input_tokens),
+                output_tokens: valid(snapshot.output_tokens),
+                total_tokens: valid(snapshot.total_tokens),
+            };
         }
     }
 
@@ -303,7 +302,7 @@ mod tests {
                 total_tokens: Some(11),
             });
             attempt.observe(TokenUsage {
-                input_tokens: None,
+                input_tokens: Some(10),
                 output_tokens: Some(4),
                 total_tokens: Some(14),
             });
@@ -318,10 +317,24 @@ mod tests {
             });
         }
         drop(context(&conn, &time, &config, &ep).begin());
+        {
+            let mut attempt = context(&conn, &time, &config, &ep).begin();
+            attempt.observe(TokenUsage {
+                input_tokens: Some(10),
+                output_tokens: Some(1),
+                total_tokens: Some(11),
+            });
+            attempt.observe(TokenUsage {
+                input_tokens: None,
+                output_tokens: Some(4),
+                total_tokens: None,
+            });
+            attempt.completed(true);
+        }
         let conn = conn.lock().unwrap();
         let summary = query(&conn, &time, &config).unwrap();
-        assert_eq!(summary.today.requests, 3);
-        assert_eq!(summary.today.unknown_requests, 2);
+        assert_eq!(summary.today.requests, 4);
+        assert_eq!(summary.today.unknown_requests, 3);
         assert_eq!(summary.today.input_tokens, 10);
         assert_eq!(summary.today.output_tokens, 4);
         assert_eq!(summary.today.total_tokens, 14);

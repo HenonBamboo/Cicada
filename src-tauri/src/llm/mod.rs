@@ -18,8 +18,10 @@ use serde_json::Value;
 pub use claude::ClaudeClient;
 pub use openai::OpenAiClient;
 
-/// 单次请求超时。流式请求只要持续有数据就不会触发
+/// 流式请求的单次读取超时。
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// 单次请求的总时限；持续心跳也不能无限阻止任务结束与数据恢复。
+const MAX_REQUEST_DURATION: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -138,6 +140,8 @@ pub struct ChatResponse {
 
 #[derive(Debug, Clone, thiserror::Error, PartialEq)]
 pub enum LlmError {
+    #[error("接口不支持流式用量参数")]
+    UsageUnsupported,
     #[error("还没有配置模型")]
     NotConfigured,
     #[error("网络连接失败：{0}")]
@@ -192,6 +196,7 @@ fn http_client() -> Result<reqwest::Client, LlmError> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(REQUEST_TIMEOUT)
+        .timeout(MAX_REQUEST_DURATION)
         .build()
         .map_err(LlmError::from)
 }
@@ -222,11 +227,30 @@ impl Model {
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
     ) -> Result<ChatResponse, LlmError> {
-        self.chat_observed(req, on_text, &|_| {}).await
+        let result = self.chat_observed(req, on_text, &|_| {}).await;
+        if matches!(result, Err(LlmError::UsageUnsupported)) {
+            self.chat_observed(req, on_text, &|_| {}).await
+        } else {
+            result
+        }
     }
 
     /// 每个实际模型请求记录一次；guard 在外层超时取消时也会保存已有用量。
     pub async fn chat_tracked(
+        &self,
+        req: &ChatRequest<'_>,
+        on_text: &(dyn Fn(&str) + Send + Sync),
+        usage: UsageContext<'_>,
+    ) -> Result<ChatResponse, LlmError> {
+        let result = self.tracked_attempt(req, on_text, usage).await;
+        if matches!(result, Err(LlmError::UsageUnsupported)) {
+            self.tracked_attempt(req, on_text, usage).await
+        } else {
+            result
+        }
+    }
+
+    async fn tracked_attempt(
         &self,
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
@@ -276,6 +300,123 @@ pub fn image_from_data_url(url: &str) -> Option<Part> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn 兼容重试保留原请求并分别记录两次用量() {
+        use crate::config::AppConfig;
+        use crate::service::testing::{clock, db};
+        use std::io::{BufRead, BufReader, Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Mutex;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for index in 0..3 {
+                let deadline = std::time::Instant::now() + Duration::from_secs(5);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(std::time::Instant::now() < deadline, "missing request");
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("{e}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut reader = BufReader::new(&stream);
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).unwrap() > 0);
+                    if line == "\r\n" {
+                        break;
+                    }
+                    if let Some((name, value)) = line.split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                bodies.push(serde_json::from_slice::<Value>(&body).unwrap());
+                drop(reader);
+                let (status, content_type, body) = if index == 0 {
+                    (
+                        "400 Bad Request",
+                        "application/json",
+                        r#"{"error":{"message":"Unknown parameter: stream_options"}}"#,
+                    )
+                } else {
+                    (
+                        "200 OK",
+                        "text/event-stream",
+                        "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n",
+                    )
+                };
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            bodies
+        });
+        let ep = Endpoint {
+            provider: ProviderId::Custom,
+            base_url: format!("http://{address}/v1"),
+            model: "test".into(),
+        };
+        let http = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(3))
+            .build()
+            .unwrap();
+        let model = Model::OpenAi(OpenAiClient::new(http, &ep, "test-key".into()));
+        let messages = [Message::User {
+            text: "test input".into(),
+        }];
+        let req = ChatRequest {
+            system: "test system",
+            messages: &messages,
+            images: &[],
+            tools: &[],
+        };
+        let conn = Mutex::new(db());
+        let time = clock("2026-10-22 10:00:00");
+        let config = AppConfig::default();
+        let result = model
+            .chat_tracked(
+                &req,
+                &|_| {},
+                UsageContext {
+                    db: &conn,
+                    clock: &time,
+                    config: &config,
+                    endpoint: &ep,
+                    purpose: "conversation",
+                    request_id: "test",
+                    notify: None,
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.text, "ok");
+        assert_eq!(model.chat(&req, &|_| {}).await.unwrap().text, "ok");
+        let mut bodies = server.join().unwrap();
+        assert_eq!(
+            bodies[0].as_object_mut().unwrap().remove("stream_options"),
+            Some(serde_json::json!({"include_usage":true}))
+        );
+        assert_eq!(bodies[0], bodies[1]);
+        assert_eq!(bodies[1], bodies[2]);
+        let summary = crate::usage::query(&conn.lock().unwrap(), &time, &config).unwrap();
+        assert_eq!(summary.today.requests, 2);
+        assert_eq!(summary.today.unknown_requests, 1);
+        assert_eq!(summary.today.total_tokens, 5);
+    }
 
     #[test]
     fn 错误分类() {

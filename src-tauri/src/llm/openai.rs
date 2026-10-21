@@ -2,6 +2,7 @@
 
 use crate::usage::TokenUsage;
 use serde_json::{Value, json};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::sse::for_each_event;
 use super::{ChatRequest, ChatResponse, Endpoint, LlmError, Message, Part, StopReason, ToolCall};
@@ -11,6 +12,7 @@ pub struct OpenAiClient {
     url: String,
     model: String,
     api_key: String,
+    include_usage: AtomicBool,
 }
 
 impl OpenAiClient {
@@ -20,6 +22,7 @@ impl OpenAiClient {
             url: format!("{}/chat/completions", ep.base_url.trim_end_matches('/')),
             model: ep.model.trim().to_string(),
             api_key,
+            include_usage: AtomicBool::new(true),
         }
     }
 
@@ -29,7 +32,11 @@ impl OpenAiClient {
         on_text: &(dyn Fn(&str) + Send + Sync),
         on_usage: &(dyn Fn(TokenUsage) + Send + Sync),
     ) -> Result<ChatResponse, LlmError> {
-        let body = build_body(&self.model, req);
+        let mut body = build_body(&self.model, req);
+        let include_usage = self.include_usage.load(Ordering::Acquire);
+        if !include_usage {
+            body.as_object_mut().unwrap().remove("stream_options");
+        }
         let resp = self
             .http
             .post(&self.url)
@@ -40,6 +47,11 @@ impl OpenAiClient {
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
             let text = resp.text().await.unwrap_or_default();
+            // 仅明确的参数拒绝允许重发，鉴权、限流、网络异常和已开始生成的响应不重发。
+            if include_usage && unsupported_usage(status, &text) {
+                self.include_usage.store(false, Ordering::Release);
+                return Err(LlmError::UsageUnsupported);
+            }
             return Err(LlmError::from_status(status, &text));
         }
         let mut acc = Accumulator::default();
@@ -53,6 +65,29 @@ impl OpenAiClient {
         .await?;
         acc.finish()
     }
+}
+
+fn unsupported_usage(status: u16, body: &str) -> bool {
+    if !matches!(status, 400 | 422) {
+        return false;
+    }
+    let text = body.to_ascii_lowercase();
+    let parameter = text.contains("stream_options") || text.contains("include_usage");
+    parameter
+        && [
+            "unsupported",
+            "not supported",
+            "unknown parameter",
+            "unrecognized",
+            "unexpected",
+            "extra_forbidden",
+            "extra inputs are not permitted",
+            "不支持",
+            "无法识别",
+            "不允许",
+        ]
+        .iter()
+        .any(|phrase| text.contains(phrase))
 }
 
 pub(super) fn build_body(model: &str, req: &ChatRequest<'_>) -> Value {
@@ -250,6 +285,20 @@ mod tests {
     use super::*;
 
     fn noop(_: &str) {}
+
+    #[test]
+    fn 仅明确拒绝用量参数时允许兼容重试() {
+        assert!(unsupported_usage(400, "Unknown parameter: stream_options"));
+        assert!(unsupported_usage(
+            422,
+            r#"{"detail":[{"type":"extra_forbidden","loc":["body","stream_options"]}]}"#
+        ));
+        for status in [200, 401, 403, 429, 500] {
+            assert!(!unsupported_usage(status, "Unsupported stream_options"));
+        }
+        assert!(!unsupported_usage(400, "Unsupported model"));
+        assert!(!unsupported_usage(400, "Invalid stream_options"));
+    }
 
     #[test]
     fn 用量末块与重复快照不累加() {

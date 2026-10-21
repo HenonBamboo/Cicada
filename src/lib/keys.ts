@@ -23,13 +23,16 @@ export function isForwardFocusShortcut(e: InputKey): boolean {
 export function moveFocusForward(current: Element): void {
   const doc = current.ownerDocument;
   const controls = [
-    ...doc.querySelectorAll<HTMLElement>("button, a[href], input, select, textarea, [tabindex]"),
+    ...doc.querySelectorAll<HTMLElement>(
+      "button, a[href], input, select, textarea, summary, [tabindex]",
+    ),
   ]
     .filter(
       (element) =>
         element.tabIndex >= 0 &&
         !element.matches(":disabled") &&
         !element.closest('[hidden], [inert], [aria-hidden="true"]') &&
+        element.checkVisibility() &&
         element.getClientRects().length > 0 &&
         doc.defaultView?.getComputedStyle(element).visibility === "visible",
     )
