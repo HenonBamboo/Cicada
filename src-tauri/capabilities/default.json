@@ -24,6 +24,7 @@
     "allow-submit-input",
     "allow-confirm-pending",
     "allow-cancel-pending",
+    "allow-stop-input",
     "allow-list-inbox",
     "allow-retry-inbox",
     "allow-discard-inbox",

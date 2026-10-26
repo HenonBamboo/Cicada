@@ -477,8 +477,14 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
-  overflow: hidden;
+  align-items: stretch;
+  overflow-x: auto;
+  padding: 2px;
+}
+.heat-main > .heat-months,
+.heat-main > .heat-grid {
+  width: max-content;
+  margin-inline: auto;
 }
 .heat-months,
 .heat-grid {
@@ -486,6 +492,7 @@
   grid-auto-flow: column;
   grid-auto-columns: 10px;
   gap: 3px;
+  flex-shrink: 0;
 }
 .heat-months {
   grid-template-rows: 14px;
@@ -884,4 +891,14 @@ button.sec.collapsed .icon {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.reply-head .reply-stop {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+.reply-stop-message {
+  margin-top: 8px;
+  color: var(--text-3);
+  font-size: 0.75rem;
 }

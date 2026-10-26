@@ -8,6 +8,7 @@ import {
   type UsageSummary,
 } from "../lib/commands";
 import { Seg } from "./SettingsControls";
+import { UsageHeatmap } from "./UsageHeatmap";
 
 const number = new Intl.NumberFormat("zh-CN");
 const PURPOSES: Record<string, string> = {
@@ -175,6 +176,7 @@ export function TokenUsage() {
           )}
         </>
       )}
+      {usage && <UsageHeatmap today={usage.businessDate} days={usage.daily} />}
       <p className="settings-note">
         仅统计本机知了的模型调用，从 0.2.5 开始记录，不代表账户账单或余额。
       </p>

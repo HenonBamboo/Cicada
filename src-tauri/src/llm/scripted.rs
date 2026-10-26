@@ -13,6 +13,8 @@ pub enum Step {
     /// 最终回复文字
     Say(&'static str),
     Fail(LlmError),
+    /// 挂起直到外层取消/超时，用于验证停止后不提交已经整理的计划。
+    Wait,
 }
 
 #[derive(Default)]
@@ -30,7 +32,7 @@ impl ScriptedModel {
         }
     }
 
-    pub fn chat(
+    pub async fn chat(
         &self,
         req: &ChatRequest<'_>,
         on_text: &(dyn Fn(&str) + Send + Sync),
@@ -46,6 +48,7 @@ impl ScriptedModel {
             .pop_front()
             .unwrap_or(Step::Say("（脚本已用完）"));
         match step {
+            Step::Wait => std::future::pending().await,
             Step::Fail(e) => Err(e),
             Step::Say(t) => {
                 on_text(t);

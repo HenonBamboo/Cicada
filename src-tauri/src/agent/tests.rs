@@ -15,6 +15,7 @@ struct Env {
     db: Mutex<Connection>,
     dir: tempfile::TempDir,
     secrets: MemoryStore,
+    runs: RunControl,
 }
 
 impl Env {
@@ -28,6 +29,7 @@ impl Env {
             db: Mutex::new(conn),
             dir,
             secrets: MemoryStore::default(),
+            runs: RunControl::default(),
         }
     }
 
@@ -41,7 +43,9 @@ impl Env {
             secrets: &self.secrets,
             on_delta: &|_, _| {},
             on_changes: &|_| {},
+            on_state: &|| {},
             usage_notify: None,
+            runs: &self.runs,
             test_model: model,
         }
     }
@@ -118,6 +122,53 @@ fn seen(m: &Model) -> Vec<(String, Vec<Message>)> {
     match m {
         Model::Scripted(s) => s.seen.lock().unwrap().clone(),
         _ => unreachable!(),
+    }
+}
+
+#[tokio::test]
+async fn 新增已完成事项保留长标题且旧两步协议补齐前不提交() {
+    let title = "第二届“AI+煤矿安全”应用场景创新大赛表的修改和报名";
+    let source = format!("今日新增并已完成：{title}");
+    for direct in [true, false] {
+        let env = Env::new();
+        let c = clock("2026-10-26 10:00:00");
+        let mut steps = vec![Step::Tools(vec![
+            (
+                "intent_checklist",
+                json!({"items":[{"id":"a","excerpt":source,"kind":"write"}]}),
+            ),
+            (
+                "task_add",
+                json!({"title":title,"done":direct,"intent_id":"a"}),
+            ),
+        ])];
+        if !direct {
+            // 清单已被第一次新增标记 handled，也不能漏掉用户要求的完成状态。
+            steps.push(Step::Say("已记录"));
+            steps.push(Step::Tools(vec![(
+                "task_set_done",
+                json!({"id":"$1","done":true,"intent_id":"a"}),
+            )]));
+        }
+        steps.push(Step::Say("已记录完成"));
+        let model = scripted(steps);
+        let reply = submit(&env.ctx(&c, Some(&model)), input(&source))
+            .await
+            .unwrap();
+        assert_eq!(reply.kind, ReplyKind::Done);
+        assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
+        assert_eq!(env.count("SELECT COUNT(*) FROM tasks WHERE status='done' AND planned_date='2026-10-26' AND done_date='2026-10-26'"), 1);
+        assert_eq!(env.count("SELECT COUNT(*) FROM completions"), 1);
+        let stored_title: String = env
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT title FROM tasks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(stored_title, title);
+        if !direct {
+            assert!(seen(&model)[2].1.iter().any(|message| matches!(message, Message::User { text } if text.contains("本轮要求新增并完成"))));
+        }
     }
 }
 
@@ -1092,4 +1143,200 @@ fn 清理恢复数据时丢弃越界图片路径但不删除文件() {
             .image_paths
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn 停止三个入口的处理中输入不提交且只允许手动重试() {
+    use std::future::Future;
+    use std::task::Poll;
+
+    for source in ["main", "quick", "sticky"] {
+        let env = Env::new();
+        let c = clock("2026-10-17 10:00:00");
+        let text = "新增：准备会议材料";
+        let model = scripted_write(
+            text,
+            vec![
+                Step::Tools(vec![("task_add", json!({"title":"准备会议材料"}))]),
+                Step::Wait,
+            ],
+        );
+        let ctx = env.ctx(&c, Some(&model));
+        let id = uuid::Uuid::new_v4().to_string();
+        ctx.svc(|s| s.inbox_register(&id, source, "task", text, &[]))
+            .unwrap();
+        let future = process(&ctx, &id);
+        tokio::pin!(future);
+        // 第一次模型返回变更计划，第二次模型挂起；此时只能有内存计划。
+        std::future::poll_fn(|cx| match future.as_mut().poll(cx) {
+            Poll::Pending => Poll::Ready(()),
+            Poll::Ready(result) => panic!("预期模型等待，实际：{result:?}"),
+        })
+        .await;
+        assert_eq!(
+            ctx.svc(|s| s.inbox_get(&id)).unwrap().status,
+            Status::Processing
+        );
+        assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+        assert_eq!(
+            stop_running(&ctx, std::slice::from_ref(&id)).unwrap(),
+            StopState::Stopping
+        );
+        let reply = tokio::time::timeout(Duration::from_secs(1), future)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(reply.lead.contains("已停止"));
+        assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+        assert_eq!(env.count("SELECT COUNT(*) FROM pending_plans"), 0);
+        let item = ctx.svc(|s| s.inbox_get(&id)).unwrap();
+        assert_eq!(item.status, Status::Failed);
+        assert_eq!(item.content, text);
+        assert!(ctx.svc(|s| s.inbox_ready()).unwrap().is_empty());
+        assert!(process(&ctx, &id).await.unwrap().lead.contains("已停止"));
+
+        let retry_model = scripted_write(
+            text,
+            vec![
+                Step::Tools(vec![("task_add", json!({"title":"准备会议材料"}))]),
+                Step::Say("已记下"),
+            ],
+        );
+        let retry_ctx = env.ctx(&c, Some(&retry_model));
+        let reply = retry(&retry_ctx, &id).await.unwrap();
+        assert_eq!(reply.kind, ReplyKind::Done);
+        assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
+    }
+}
+
+#[tokio::test]
+async fn 整轮期限丢弃待提交计划并清理处理中状态() {
+    let env = Env::new();
+    let c = clock("2026-10-17 10:00:00");
+    let text = "新增：准备会议材料";
+    let model = scripted_write(
+        text,
+        vec![
+            Step::Tools(vec![("task_add", json!({"title":"准备会议材料"}))]),
+            Step::Wait,
+        ],
+    );
+    let ctx = env.ctx(&c, Some(&model));
+    let id = uuid::Uuid::new_v4().to_string();
+    ctx.svc(|s| s.inbox_register(&id, "main", "task", text, &[]))
+        .unwrap();
+    let reply = run_with_timeout(&ctx, &id, None, Duration::from_millis(20))
+        .await
+        .unwrap();
+    assert_eq!(reply.kind, ReplyKind::Error);
+    assert!(reply.lead.contains("超过 3 分钟"));
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+    let item = ctx.svc(|s| s.inbox_get(&id)).unwrap();
+    assert_eq!(item.status, Status::Failed);
+    assert_eq!(item.status_reason.as_deref(), Some("timed_out"));
+    assert!(ctx.svc(|s| s.inbox_ready()).unwrap().is_empty());
+    assert!(ctx.runs.start(&id).is_some());
+}
+
+#[tokio::test]
+async fn 已读取确认计划后停止仍不能提交() {
+    let env = Env::new();
+    let task = env.add_task("开会");
+    let c = clock("2026-10-17 10:00:00");
+    let model = scripted_write(
+        "删掉开会",
+        vec![
+            Step::Tools(vec![("task_delete", json!({"id":task.to_string()}))]),
+            Step::Say("请确认"),
+        ],
+    );
+    let ctx = env.ctx(&c, Some(&model));
+    let reply = submit(&ctx, input("删掉开会")).await.unwrap();
+    assert_eq!(reply.kind, ReplyKind::Confirm);
+    let id = &reply.request_id;
+    // 精确重放 confirm 已读出计划、尚未取得 commit 数据库锁时发生停止的交错。
+    let pending = ctx.svc(|s| s.pending_get(id)).unwrap().unwrap();
+    let plan: Vec<Change> = serde_json::from_str(&pending.plan).unwrap();
+    let pins: Vec<Pin> = serde_json::from_str(&pending.versions).unwrap();
+    let preview: Vec<PreviewItem> =
+        serde_json::from_str(pending.preview.as_deref().unwrap()).unwrap();
+    let context: ConfirmContext =
+        serde_json::from_str(pending.context.as_deref().unwrap()).unwrap();
+    assert_eq!(
+        stop_running(&ctx, std::slice::from_ref(id)).unwrap(),
+        StopState::Stopped
+    );
+    let result = commit(
+        &ctx,
+        id,
+        &[],
+        &plan,
+        &pins,
+        &preview,
+        "",
+        context.snapshots.as_deref(),
+    )
+    .unwrap();
+    assert!(result.lead.contains("已停止"));
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 1);
+    assert_eq!(env.count("SELECT COUNT(*) FROM op_log"), 0);
+}
+
+#[tokio::test]
+async fn 网络失败早退与停止同时发生不能重新排队() {
+    let env = Env::new();
+    let c = clock("2026-10-17 10:00:00");
+    let model = scripted(vec![Step::Fail(LlmError::Network("离线测试".into()))]);
+    let mut ctx = env.ctx(&c, Some(&model));
+    let id = uuid::Uuid::new_v4().to_string();
+    // select 已检查取消分支后，run_inner 在同一次 poll 中接受停止并返回网络错误。
+    let stop_after_claim = || {
+        env.runs.stop(&id);
+    };
+    ctx.on_state = &stop_after_claim;
+    let reply = submit_with_id(&ctx, input("记一件事"), Some(id.clone()))
+        .await
+        .unwrap();
+    assert_eq!(seen(&model).len(), 1);
+    assert!(reply.lead.contains("已停止"));
+    let item = ctx.svc(|s| s.inbox_get(&id)).unwrap();
+    assert_eq!(item.status, Status::Failed);
+    assert_eq!(item.status_reason.as_deref(), Some("cancelled"));
+    assert!(ctx.svc(|s| s.inbox_ready()).unwrap().is_empty());
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+}
+
+#[tokio::test]
+async fn 取消后的遗留追问上下文不能被自由续答重新排队() {
+    let env = Env::new();
+    let c = clock("2026-10-17 10:00:00");
+    let model = scripted_write(
+        "记录一下",
+        vec![Step::Tools(vec![(
+            "ask_clarify",
+            json!({"question":"要记录哪件事？","options":["交周报"]}),
+        )])],
+    );
+    let ctx = env.ctx(&c, Some(&model));
+    let reply = submit(&ctx, input("记录一下")).await.unwrap();
+    assert_eq!(reply.kind, ReplyKind::Clarify);
+    let id = &reply.request_id;
+    // 保留旧追问快照，模拟续答已取得上下文，但停止已经把请求变为终止状态。
+    ctx.svc(|s| {
+        s.inbox_set(
+            id,
+            Status::Failed,
+            Some("cancelled"),
+            Some(STOPPED_MESSAGE),
+            None,
+        )
+    })
+    .unwrap();
+    assert!(answer(&ctx, id, "交周报".into()).await.is_err());
+    let item = ctx.svc(|s| s.inbox_get(id)).unwrap();
+    assert_eq!(item.status, Status::Failed);
+    assert_eq!(item.status_reason.as_deref(), Some("cancelled"));
+    assert!(ctx.svc(|s| s.inbox_ready()).unwrap().is_empty());
+    assert_eq!(seen(&model).len(), 1, "停止之后不能再次请求模型");
+    assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
 }

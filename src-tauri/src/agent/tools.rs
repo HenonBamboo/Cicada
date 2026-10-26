@@ -57,13 +57,14 @@ pub fn specs() -> Vec<ToolSpec> {
     vec![
         spec(
             "task_add",
-            "添加一条任务。",
+            "添加一条任务。明确新增已经完成的事项时传 done=true，新增和完成会一并计入计划。",
             json!({
                 "title": { "type": "string", "description": "要做的事，简短，不含时间和\"提醒我\"等字眼" },
                 "planned_date": { "type": "string", "description": format!("计划日期 {DATE_HINT}，默认今天") },
                 "due_at": { "type": "string", "description": format!("截止时间 {TIME_HINT}") },
                 "remind_at": { "type": "string", "description": format!("提醒时间 {TIME_HINT}") },
-                "note": { "type": "string", "description": "备注" }
+                "note": { "type": "string", "description": "备注" },
+                "done": { "type": "boolean", "description": "用户明确说这条新事项已经完成时为 true，默认 false" }
             }),
             &["title"],
         ),
@@ -380,24 +381,41 @@ pub fn handle_at(
                 Ok(c) => c,
                 Err(e) => return Outcome::Error(e),
             };
+            let new_task = matches!(change, Change::TaskAdd { .. }).then(|| {
+                plan.iter()
+                    .filter(|c| matches!(c, Change::TaskAdd { .. }))
+                    .count()
+                    + 1
+            });
+            let done = if new_task.is_some() {
+                match args.get("done") {
+                    None | Some(Value::Bool(false)) => false,
+                    Some(Value::Bool(true)) => true,
+                    _ => return Outcome::Error("done 必须为布尔值".into()),
+                }
+            } else {
+                false
+            };
             // 连同已有计划一起校验：引用、存在性、格式
             let mut trial = plan.clone();
-            trial.push(change.clone());
+            trial.push(change);
+            if done {
+                trial.push(Change::TaskSetDone {
+                    task: TaskRef::Temp(format!("${}", new_task.unwrap())),
+                    done: true,
+                });
+            }
             if let Err(e) = svc.validate_plan(&trial) {
                 return Outcome::Error(format!("没有计入：{e}"));
             }
-            let note = match &change {
-                Change::TaskAdd { .. } => {
-                    let n = plan
-                        .iter()
-                        .filter(|c| matches!(c, Change::TaskAdd { .. }))
-                        .count()
-                        + 1;
-                    format!("已计入计划，本次新建引用为 ${n}。")
+            let note = match new_task {
+                Some(n) if done => {
+                    format!("新增及完成均已计入计划，本次新建引用为 ${n}，无需再标记完成。")
                 }
+                Some(n) => format!("已计入计划，本次新建引用为 ${n}。"),
                 _ => "已计入计划。".into(),
             };
-            plan.push(change);
+            *plan = trial;
             Outcome::Ok(format!("{note}所有改动会在你回复后统一执行。"))
         }
     }
@@ -456,6 +474,66 @@ mod tests {
         ));
         assert!(to_change("task_delete", &json!({}), "x").is_err());
         assert!(to_change("rm_rf", &json!({}), "x").is_err());
+    }
+
+    #[test]
+    fn 新增完成原子校验且引用本轮正确的新任务() {
+        use crate::config::AppConfig;
+        use crate::service::testing::{clock, count, db};
+
+        let conn = db();
+        let clock = clock("2026-10-26 10:00:00");
+        let svc = Service::new(&conn, &clock, &AppConfig::default()).unwrap();
+        let mut plan =
+            vec![to_change("task_add", &json!({"title":"原有计划"}), "2026-10-26").unwrap()];
+        let call = |args| ToolCall {
+            id: "c".into(),
+            name: "task_add".into(),
+            arguments: Some(args),
+        };
+        for args in [
+            json!({"title":"新任务","done":"true"}),
+            json!({"title":"新任务","planned_date":"2026-99-99","done":true}),
+        ] {
+            assert!(matches!(
+                handle(&svc, &call(args), &mut plan),
+                Outcome::Error(_)
+            ));
+            assert_eq!(plan.len(), 1);
+        }
+        assert!(matches!(
+            handle(
+                &svc,
+                &call(json!({"title":"比赛表的修改和报名","done":true})),
+                &mut plan
+            ),
+            Outcome::Ok(_)
+        ));
+        assert_eq!(plan.len(), 3);
+        assert_eq!(
+            plan[2],
+            Change::TaskSetDone {
+                task: TaskRef::Temp("$2".into()),
+                done: true
+            }
+        );
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 0);
+        let validated = svc.validate_plan(&plan).unwrap();
+        svc.apply_plan(
+            &plan,
+            &validated.pins,
+            "record-done",
+            crate::service::oplog::Source::Chat,
+        )
+        .unwrap();
+        assert_eq!(
+            count(
+                &conn,
+                "SELECT COUNT(*) FROM tasks WHERE title='比赛表的修改和报名' AND status='done' AND done_date='2026-10-26'"
+            ),
+            1
+        );
+        assert_eq!(count(&conn, "SELECT COUNT(*) FROM completions"), 1);
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub const COMMANDS: &[&str] = &[
     "submit_input",
     "confirm_pending",
     "cancel_pending",
+    "stop_input",
     "list_inbox",
     "list_input_history",
     "retry_inbox",

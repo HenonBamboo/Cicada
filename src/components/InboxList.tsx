@@ -11,11 +11,13 @@ export function InboxList({
   busy,
   onRetry,
   onDiscard,
+  onStop,
 }: {
   items: InboxItem[];
   busy: boolean;
   onRetry: (item: InboxItem) => void;
   onDiscard: (id: string) => void;
+  onStop: (id: string) => void;
 }) {
   return (
     <div className="inbox-list">
@@ -24,7 +26,12 @@ export function InboxList({
           <div className="inbox-content">
             <span>{item.content || "图片输入"}</span>
             <small>
-              {item.receivedAt} · {STATUS[item.status]}
+              {item.receivedAt} ·{" "}
+              {item.statusReason === "cancelled"
+                ? "已停止"
+                : item.statusReason === "timed_out"
+                  ? "处理超时"
+                  : STATUS[item.status]}
             </small>
             {item.lastError && <small>{item.lastError}</small>}
           </div>
@@ -35,13 +42,15 @@ export function InboxList({
           >
             {item.status === "awaiting" ? "继续" : "重试"}
           </button>
-          <button
-            className="btn ghost"
-            disabled={busy || item.status === "processing"}
-            onClick={() => onDiscard(item.id)}
-          >
-            放弃
-          </button>
+          {item.status === "processing" || item.status === "queued" ? (
+            <button className="btn ghost" disabled={busy} onClick={() => onStop(item.id)}>
+              停止
+            </button>
+          ) : (
+            <button className="btn ghost" disabled={busy} onClick={() => onDiscard(item.id)}>
+              放弃
+            </button>
+          )}
         </div>
       ))}
     </div>

@@ -416,7 +416,13 @@ export function MainWindow() {
                 </ReplyCard>
               )}
               {reply && (
-                <ReplyCard view={reply} onClose={() => setReply(null)}>
+                <ReplyCard
+                  view={reply}
+                  onClose={() => setReply(null)}
+                  onStop={agent.canStop ? () => void agent.stop() : undefined}
+                  stopPending={agent.stopPending}
+                  stopMessage={agent.stopMessage}
+                >
                   {agent.showInbox && (
                     <InboxList
                       items={agent.inbox}
@@ -426,6 +432,7 @@ export function MainWindow() {
                         void agent.retry(item);
                       }}
                       onDiscard={(id) => void agent.discard(id)}
+                      onStop={(id) => void agent.stopInbox(id)}
                     />
                   )}
                   {agent.result && (

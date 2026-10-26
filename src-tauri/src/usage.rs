@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use chrono::Datelike;
+use chrono::{Datelike, Days};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -168,6 +168,19 @@ pub struct UsagePeriod {
 pub struct UsageSummary {
     pub today: UsagePeriod,
     pub month: UsagePeriod,
+    pub business_date: String,
+    pub daily: Vec<UsageDay>,
+}
+
+#[derive(Default, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageDay {
+    pub date: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    pub requests: u64,
+    pub unknown_requests: u64,
 }
 
 #[derive(Default)]
@@ -212,6 +225,11 @@ impl Aggregate {
 
 pub fn query(conn: &Connection, clock: &dyn Clock, config: &AppConfig) -> AppResult<UsageSummary> {
     let today = clock.business_date(parse_cutoff(&config.time.day_cutoff)?);
+    let heat_from = today
+        .checked_sub_days(Days::new(366))
+        .unwrap_or(today)
+        .format(DATE_FMT)
+        .to_string();
     let first = today
         .with_day(1)
         .unwrap_or(today)
@@ -251,9 +269,36 @@ pub fn query(conn: &Connection, clock: &dyn Clock, config: &AppConfig) -> AppRes
             day.add(&provider, &model, &purpose, usage);
         }
     }
+    // 日历只传每日汇总，不把全年逐次请求明细带到前端；未知用量单独计数。
+    let mut stmt = conn.prepare(
+        "WITH daily_source AS (
+           SELECT *, (status='success' AND input_tokens IS NOT NULL
+             AND output_tokens IS NOT NULL AND total_tokens IS NOT NULL) AS known
+           FROM token_usage WHERE business_date > ?1 AND business_date <= ?2
+         )
+         SELECT business_date,
+           SUM(CASE WHEN known THEN input_tokens ELSE 0 END),
+           SUM(CASE WHEN known THEN output_tokens ELSE 0 END),
+           SUM(CASE WHEN known THEN total_tokens ELSE 0 END), COUNT(*), SUM(NOT known)
+         FROM daily_source GROUP BY business_date ORDER BY business_date",
+    )?;
+    let daily = stmt
+        .query_map(params![heat_from, today], |row| {
+            Ok(UsageDay {
+                date: row.get(0)?,
+                input_tokens: row.get(1)?,
+                output_tokens: row.get(2)?,
+                total_tokens: row.get(3)?,
+                requests: row.get(4)?,
+                unknown_requests: row.get(5)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(UsageSummary {
         today: day.finish(),
         month: month.finish(),
+        business_date: today,
+        daily,
     })
 }
 
@@ -338,6 +383,9 @@ mod tests {
         assert_eq!(summary.today.input_tokens, 10);
         assert_eq!(summary.today.output_tokens, 4);
         assert_eq!(summary.today.total_tokens, 14);
+        assert_eq!(summary.daily.len(), 1);
+        assert_eq!(summary.daily[0].total_tokens, 14);
+        assert_eq!(summary.daily[0].unknown_requests, 3);
         let (origin, tokens): (String, Option<i64>) = conn.query_row(
             "SELECT origin_hash,total_tokens FROM token_usage WHERE status='cancelled' AND total_tokens IS NOT NULL", [],
             |r| Ok((r.get(0)?, r.get(1)?)),
@@ -356,6 +404,7 @@ mod tests {
         config.time.day_cutoff = "04:00".into();
         let ep = endpoint();
         for date in [
+            "2025-10-01 10:00:00",
             "2026-09-30 10:00:00",
             "2026-10-01 10:00:00",
             "2026-11-01 02:00:00",
@@ -378,5 +427,16 @@ mod tests {
         assert_eq!(summary.month.by_model.len(), 1);
         assert_eq!(summary.month.by_model[0].purpose, "");
         assert_eq!(summary.month.by_purpose[0].provider, "");
+        assert_eq!(summary.business_date, "2026-10-31");
+        assert_eq!(summary.daily.len(), 3);
+        assert_eq!(summary.daily[0].date, "2026-09-30");
+        assert_eq!(
+            summary
+                .daily
+                .iter()
+                .map(|day| day.total_tokens)
+                .sum::<u64>(),
+            15
+        );
     }
 }

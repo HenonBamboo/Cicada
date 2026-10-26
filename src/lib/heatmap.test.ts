@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHeatGrid, level, WEEKS } from "./heatmap";
+import { buildHeatGrid, heatCalendar, level, WEEKS } from "./heatmap";
 
 describe("buildHeatGrid", () => {
   const today = "2026-10-17"; // 周六
@@ -38,5 +38,20 @@ describe("buildHeatGrid", () => {
 
   it("分级阈值", () => {
     expect([0, 1, 2, 3, 4, 5, 6, 7].map(level)).toEqual([0, 1, 1, 2, 2, 3, 3, 4]);
+  });
+
+  it("仅统计近一年，补齐格和未来记录不计入合计", () => {
+    expect(heatCalendar("2024-02-29").from).toBe("2023-03-01");
+    expect(heatCalendar("2025-02-28").from).toBe("2024-02-29");
+    const grid = buildHeatGrid(today, [
+      { date: "2025-10-17", tasks: 10, nodes: 0 },
+      { date: "2025-10-18", tasks: 1, nodes: 1 },
+      { date: "2026-10-18", tasks: 10, nodes: 0 },
+    ]);
+    expect(grid.total).toBe(2);
+    expect(grid.cells.find((cell) => cell.date === "2025-10-17")?.outside).toBe(true);
+    const calendar = heatCalendar(today);
+    expect(calendar.dates.length).toBe(calendar.weeks * 7);
+    expect(calendar.months.reduce((sum, month) => sum + month.span, 0)).toBe(calendar.weeks);
   });
 });

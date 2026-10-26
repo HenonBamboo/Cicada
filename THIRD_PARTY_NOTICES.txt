@@ -1,13 +1,13 @@
 THIRD-PARTY SOFTWARE NOTICES
 
-Cicada 0.2.6
+Cicada 0.2.7
 Generated from the locked dependency metadata on 2026-10-22.
 
 Cicada itself is licensed under GNU Affero General Public License v3.0 only.
 The notices below apply to third-party components and do not relicense them.
 
-package-lock.json SHA-256: ED78A632B11AABEA5D62320EBC265909E8ABEAABED054FC46ABAA3DB264C4F42
-Cargo.lock SHA-256: A074C7D9A0E4E06F3EDBA8B3ECD515331C41D8DBB50CA61A44FBBFAA9E580550
+package-lock.json SHA-256: AD636E73B1A781B1B5EF341D283D77708E166FB7898D8CB9290F1BCF0D6C84AE
+Cargo.lock SHA-256: FDF9E7D8A532CF1B17F3CF22FB47E0B99C8FE98DB92DCC70CD2702847B42B9B6
 
 This file covers the npm runtime dependency graph recorded in package-lock.json
 and the Rust normal/build dependency graph resolved for x86_64-pc-windows-msvc.

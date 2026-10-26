@@ -8,7 +8,7 @@
 一个安静地待在 Windows 桌面的个人任务与项目助手。<br>
 用自然语言记事、安排任务、推进项目和回顾完成情况，不必反复打开表单整理字段。
 
-[![Version](https://img.shields.io/badge/version-0.2.6-287f73?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.7-287f73?style=flat-square)](CHANGELOG.md)
 [![Windows 11](https://img.shields.io/badge/Windows-11%20x64-0078d4?style=flat-square&logo=windows11)](#下载与使用)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24c8db?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app/)
 [![License](https://img.shields.io/badge/license-AGPL--3.0--only-1f4733?style=flat-square)](LICENSE)
@@ -51,7 +51,7 @@
 
 ### 自动留下回顾线索
 
-完成热力图展示近一年的节奏，周报、月报和年报基于本机归档数据生成。提示词可查看、修改和恢复默认。
+完成热力图展示近一年做过的事。周报、月报和年报基于本机归档数据生成。提示词可查看、修改和恢复默认。
 
 ### 写入有边界，也能后悔
 
@@ -63,9 +63,9 @@
 
 ## 下载与使用
 
-知了 `0.2.6` 提供 **Windows 11 x64** 无需安装的直接运行 EXE。
+知了 `0.2.7` 提供 **Windows 11 x64** 无需安装的直接运行 EXE。
 
-从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.6-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
+从 [GitCode Releases](https://gitcode.com/HenonBamboo_YYJ/Cicada/releases) 或 [GitHub Releases](https://github.com/HenonBamboo/Cicada/releases) 下载 `Cicada-0.2.7-windows-x64.exe` 或便携 ZIP。两处发布同一源码标签和相同下载文件。
 
 **从 0.2.2 及更早版本升级：** 0.2.3 起使用新的更新签名密钥，请先退出旧程序，手动下载新版覆盖原 EXE。数据和自定义提示词会保留；0.2.3 及后续版本支持应用内更新。
 
@@ -79,7 +79,7 @@
 
 Base URL 支持 HTTP 和 HTTPS。HTTP 会明文传输请求内容和 API Key，只应连接受信任的模型服务。
 
-“设置 → 模型”可查看今日、本月的 Token 用量及模型、用途分类。从 0.2.5 开始本地记录服务商返回的用量；缺失或未完成的请求单独计为未知，不估算费用，也不代表整个 API 账户的账单。
+“设置 → 模型”可查看今日、本月的 Token 用量、模型与用途分类，以及每日用量热力图。从 0.2.5 开始本地记录服务商返回的用量；缺失或未完成的请求单独计为未知，不估算费用，也不代表整个 API 账户的账单。
 
 ### 默认快捷键
 

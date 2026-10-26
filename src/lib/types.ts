@@ -130,6 +130,7 @@ export interface InboxItem {
   content: string;
   receivedAt: string;
   status: "queued" | "processing" | "awaiting" | "done" | "failed";
+  statusReason: string | null;
   lastError: string | null;
   resultSummary: string | null;
 }

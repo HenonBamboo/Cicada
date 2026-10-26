@@ -69,6 +69,9 @@ export function submitInput(
 export const confirmPending = (requestId: string) =>
   invoke<Reply>("confirm_pending", { requestId });
 export const cancelPending = (requestId: string) => invoke<Reply>("cancel_pending", { requestId });
+export type StopInputState = "stopping" | "stopped" | "committing" | "finished";
+export const stopInput = (requestIds: string[]) =>
+  invoke<StopInputState>("stop_input", { requestIds });
 export const undoLast = () => invoke<Reply>("undo_last");
 export const listInbox = () => invoke<InboxItem[]>("list_inbox");
 export type InputSource = "main" | "quick" | "sticky";
@@ -113,6 +116,16 @@ export interface UsagePeriod {
 export interface UsageSummary {
   today: UsagePeriod;
   month: UsagePeriod;
+  businessDate: string;
+  daily: UsageDay[];
+}
+export interface UsageDay {
+  date: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  requests: number;
+  unknownRequests: number;
 }
 export const getTokenUsage = () => invoke<UsageSummary>("get_token_usage");
 export const onTokenUsageChanged = (handler: () => void) => listen("token-usage-changed", handler);

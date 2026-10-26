@@ -14,10 +14,12 @@ mod project_tools;
 mod recur_tools;
 mod reply;
 mod report_tools;
+pub mod run_control;
 pub mod tools;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use base64::Engine;
 use rusqlite::Connection;
@@ -35,6 +37,7 @@ use crate::service::oplog::Source;
 use crate::service::{ChangeSet, Service};
 
 pub use reply::{AgentReply, ReplyKind};
+use run_control::{RunControl, RunGuard, StopState};
 
 /// 固定执行约束供运行与设置页预览共用，不写入可编辑提示词。
 pub(crate) fn runtime_instructions() -> &'static str {
@@ -47,6 +50,8 @@ pub(crate) fn tool_specs(mode: &str) -> Vec<crate::llm::ToolSpec> {
 
 /// 一轮里最多调用模型的次数，防止工具调用死循环
 const MAX_ROUNDS: usize = 8;
+/// 整轮共用期限，包含识图和所有工具回合，避免每一轮单独等满超时。
+const RUN_TIMEOUT: Duration = Duration::from_secs(180);
 /// 待确认 / 待追问的有效期
 const PENDING_MINUTES: i64 = 10;
 /// 网络失败的重试间隔（秒）与次数
@@ -93,7 +98,9 @@ pub struct Ctx<'a> {
     pub on_delta: &'a (dyn Fn(&str, &str) + Send + Sync),
     /// 数据变更（通知所有窗口刷新）
     pub on_changes: &'a (dyn Fn(&ChangeSet) + Send + Sync),
+    pub on_state: &'a (dyn Fn() + Send + Sync),
     pub usage_notify: Option<&'a tokio::sync::Notify>,
+    pub runs: &'a RunControl,
     /// 测试时注入脚本化模型
     #[cfg(test)]
     pub test_model: Option<&'a Model>,
@@ -573,16 +580,24 @@ pub async fn process(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
             "暂存图片已清理，请重新上传图片。".into(),
         ));
     }
-    let result = run(ctx, id, None).await;
-    if let Err(e) = &result {
-        ctx.svc(|s| {
-            if s.inbox_get(id)?.status == Status::Processing {
-                s.inbox_set(id, Status::Failed, None, Some(&e.to_string()), None)?;
-            }
-            Ok(())
-        })?;
-    }
-    result
+    run(ctx, id, None).await
+}
+
+/// 显式重试会解除停止标记，后台队列不能自动重启已停止的输入。
+pub async fn retry(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
+    ctx.svc(|s| {
+        let item = s.inbox_get(id)?;
+        if item.status == Status::Failed
+            && matches!(
+                item.status_reason.as_deref(),
+                Some("cancelled" | "timed_out")
+            )
+        {
+            s.inbox_set(id, Status::Queued, None, None, None)?;
+        }
+        Ok(())
+    })?;
+    process(ctx, id).await
 }
 
 async fn run(
@@ -590,7 +605,66 @@ async fn run(
     id: &str,
     resume: Option<(ClarifyContext, String, Option<clarify::PendingOption>)>,
 ) -> AppResult<AgentReply> {
+    run_with_timeout(ctx, id, resume, RUN_TIMEOUT).await
+}
+
+async fn run_with_timeout(
+    ctx: &Ctx<'_>,
+    id: &str,
+    resume: Option<(ClarifyContext, String, Option<clarify::PendingOption>)>,
+    timeout: Duration,
+) -> AppResult<AgentReply> {
+    let Some(guard) = ctx.runs.start(id) else {
+        return Ok(AgentReply::info(id, "这条输入正在处理中。".into()));
+    };
+    // 取消只丢弃尚未提交的内存计划。run_inner 最终落盘段不挂起，提交与停止由阶段锁仲裁。
+    let result = tokio::select! {
+        biased;
+        _ = guard.cancelled() => stopped(ctx, id, false),
+        _ = tokio::time::sleep(timeout) => stopped(ctx, id, true),
+        result = run_inner(ctx, id, resume, &guard) => result,
+    };
+    // 取消可发生在本次 poll 内的同步早退阶段（例如网络失败排入自动重试）。
+    // 同一阶段锁先封闭后续取消，已接受的取消统一覆盖为可手动重试的停止状态。
+    let result = if guard.finish() {
+        stopped(ctx, id, false)
+    } else {
+        result
+    };
+    // process、自由续答和结构化续答统一清理；数据库/解析异常也不能遗留 Processing。
+    if let Err(error) = &result {
+        ctx.svc(|s| {
+            if s.inbox_get(id)?.status == Status::Processing {
+                s.pending_delete(id)?;
+                s.inbox_set(id, Status::Failed, None, Some(&error.to_string()), None)?;
+            }
+            Ok(())
+        })?;
+    }
+    (ctx.on_state)();
+    result
+}
+
+async fn run_inner(
+    ctx: &Ctx<'_>,
+    id: &str,
+    resume: Option<(ClarifyContext, String, Option<clarify::PendingOption>)>,
+    guard: &RunGuard<'_>,
+) -> AppResult<AgentReply> {
     let item = ctx.svc(|s| s.inbox_get(id))?;
+    if matches!(
+        item.status_reason.as_deref(),
+        Some("cancelled" | "timed_out")
+    ) {
+        let message = item
+            .last_error
+            .unwrap_or_else(|| "已停止，请手动重试。".into());
+        return Ok(if item.status_reason.as_deref() == Some("cancelled") {
+            AgentReply::info(id, message)
+        } else {
+            AgentReply::error(id, message)
+        });
+    }
     if item.status == Status::Done {
         return Ok(AgentReply::info(
             id,
@@ -601,6 +675,7 @@ async fn run(
     if !ctx.svc(|s| s.inbox_claim(id))? {
         return Ok(AgentReply::info(id, "这条输入正在处理中。".into()));
     }
+    (ctx.on_state)();
 
     let chat = match ctx.chat_model() {
         Ok(m) => m,
@@ -810,13 +885,22 @@ async fn run(
             raw: resp.raw.clone(),
         });
         if resp.tool_calls.is_empty() {
-            if let Some(missing) = checklist.incomplete(plan.len(), &intent_source) {
+            if let Some(missing) = checklist
+                .incomplete(plan.len(), &intent_source)
+                .or_else(|| {
+                    if item.mode == "task" {
+                        intent::task_record_mismatch(&intent_source, &plan, &item.business_date)
+                    } else {
+                        None
+                    }
+                })
+            {
                 if failures.repeated(&format!("coverage:{missing}")) {
                     return fail(
                         ctx,
                         id,
                         &item.image_paths,
-                        "模型未能完整整理本次要求，没有执行任何改动。请重新说明需要处理的内容。",
+                        "模型未能完整整理本次要求，没有执行任何改动。原文已保留，可在收件箱重试。",
                     );
                 }
                 messages.push(Message::User {
@@ -835,7 +919,7 @@ async fn run(
                         ctx,
                         id,
                         &item.image_paths,
-                        "模型未能用名称和时间准确说明本次内容，没有执行任何改动。请重新说明需要处理的内容。",
+                        "模型未能用名称和时间准确说明本次内容，没有执行任何改动。原文已保留，可在收件箱重试。",
                     );
                 }
                 messages.push(Message::User { text: "回复及intent_resolve的evidence不能使用内部编号或第几条定位，请改用任务标题、计划日期、提醒时间或完整项目路径。若已有查询结论含编号，请重新intent_resolve修正evidence；不要重复调用已经成功的写工具。".into() });
@@ -923,7 +1007,7 @@ async fn run(
                             ctx,
                             id,
                             &item.image_paths,
-                            &format!("{reason}，没有执行任何改动。请用名称和日期重新说明。"),
+                            &format!("{reason}，没有执行任何改动。原文已保留，可在收件箱重试。"),
                         );
                     }
                     messages.push(Message::ToolResult {
@@ -937,6 +1021,9 @@ async fn run(
                     options,
                     mut entity_options,
                 } => {
+                    if !guard.begin_finish() {
+                        return stopped(ctx, id, false);
+                    }
                     // 同一轮里后面的调用不再执行，但每个调用都要有结果
                     for rest in &calls[i + 1..] {
                         messages.push(Message::ToolResult {
@@ -995,7 +1082,7 @@ async fn run(
             ctx,
             id,
             &item.image_paths,
-            "模型未能在本次处理中完成解析，没有执行任何改动。请用名称和日期重新说明。",
+            "模型未能在本次处理中完成解析，没有执行任何改动。原文已保留，可在收件箱重试。",
         );
     }
     let text = if plan.is_empty() {
@@ -1003,17 +1090,29 @@ async fn run(
     } else {
         checklist.query_answers()
     };
-    finish(ctx, id, &item.image_paths, plan, text).await
+    if !guard.begin_finish() {
+        return stopped(ctx, id, false);
+    }
+    finish(ctx, id, &item.image_paths, plan, text)
 }
 
 async fn answer(ctx: &Ctx<'_>, id: &str, text: String) -> AppResult<AgentReply> {
-    let p = ctx
-        .svc(|s| s.pending_get(id))?
-        .ok_or_else(|| AppError::Invalid("这个问题已经过期了，请重新说一遍".into()))?;
-    let context: ClarifyContext = serde_json::from_str(p.context.as_deref().unwrap_or("{}"))?;
-    ctx.svc(|s| {
+    // 读取、核对及消费共用一个锁，已停止的追问不能被旧续答重新置入队列。
+    let context = ctx.svc(|s| {
+        let pending = s
+            .pending_get(id)?
+            .filter(|pending| pending.kind == "clarify")
+            .ok_or_else(|| AppError::Invalid("这个问题已经过期了，请重新说一遍".into()))?;
+        if s.inbox_get(id)?.status != Status::Awaiting {
+            return Err(AppError::Invalid(
+                "这条追问已停止或已处理，请重新输入。".into(),
+            ));
+        }
+        let context: ClarifyContext =
+            serde_json::from_str(pending.context.as_deref().unwrap_or("{}"))?;
         s.pending_delete(id)?;
-        s.inbox_set(id, Status::Queued, None, None, None)
+        s.inbox_set(id, Status::Queued, None, None, None)?;
+        Ok(context)
     })?;
     run(ctx, id, Some((context, text, None))).await
 }
@@ -1058,7 +1157,7 @@ pub async fn respond_selection(
     run(ctx, reply_to, Some((context, text, Some(choice)))).await
 }
 
-async fn finish(
+fn finish(
     ctx: &Ctx<'_>,
     id: &str,
     images: &[String],
@@ -1153,6 +1252,15 @@ fn commit(
     };
     let result = ctx.svc(|s| {
         let item = s.inbox_get(id)?;
+        // 确认按钮可能已读出计划，随后另一入口停止了这条输入；必须在同一写入锁内再检查。
+        if matches!(
+            item.status_reason.as_deref(),
+            Some("cancelled" | "timed_out")
+        ) {
+            return Ok(Err(item
+                .last_error
+                .unwrap_or_else(|| STOPPED_MESSAGE.into())));
+        }
         if item.status == Status::Done {
             return Ok(Err(item
                 .result_summary
@@ -1310,6 +1418,72 @@ pub fn cancel(ctx: &Ctx<'_>, id: &str) -> AppResult<AgentReply> {
         id,
         item.result_summary.unwrap_or_else(|| "已取消".into()),
     ))
+}
+
+/// 停止当前处理或尚未开始的队列输入。原文保留，只有显式重试才会再次执行。
+pub fn stop_running(ctx: &Ctx<'_>, ids: &[String]) -> AppResult<StopState> {
+    let mut result = StopState::Finished;
+    for id in ids {
+        let active = ctx.runs.stop(id);
+        if active != StopState::Finished {
+            return Ok(active);
+        }
+        let state = ctx.svc(|s| {
+            // 登记运行与读取队列可能同时发生；在数据库锁内再次查运行状态。
+            let active = ctx.runs.stop(id);
+            if active != StopState::Finished {
+                return Ok(active);
+            }
+            if !s.inbox_exists(id)? {
+                return Ok(StopState::Finished);
+            }
+            let item = s.inbox_get(id)?;
+            if matches!(
+                item.status,
+                Status::Queued | Status::Processing | Status::Awaiting
+            ) {
+                s.pending_delete(id)?;
+                s.inbox_set(
+                    id,
+                    Status::Failed,
+                    Some("cancelled"),
+                    Some(STOPPED_MESSAGE),
+                    None,
+                )?;
+                return Ok(StopState::Stopped);
+            }
+            Ok(StopState::Finished)
+        })?;
+        if state != StopState::Finished {
+            result = state;
+        }
+    }
+    Ok(result)
+}
+
+const STOPPED_MESSAGE: &str = "已停止本次处理，没有执行任何改动。输入已保留，可在收件箱重试。";
+
+fn stopped(ctx: &Ctx<'_>, id: &str, timed_out: bool) -> AppResult<AgentReply> {
+    let message = if timed_out {
+        "本次处理超过 3 分钟，已停止，没有执行任何改动。输入已保留，可在收件箱重试。"
+    } else {
+        STOPPED_MESSAGE
+    };
+    ctx.svc(|s| {
+        s.pending_delete(id)?;
+        s.inbox_set(
+            id,
+            Status::Failed,
+            Some(if timed_out { "timed_out" } else { "cancelled" }),
+            Some(message),
+            None,
+        )
+    })?;
+    Ok(if timed_out {
+        AgentReply::error(id, message.into())
+    } else {
+        AgentReply::info(id, message.into())
+    })
 }
 
 /// 放弃收件箱里的一条

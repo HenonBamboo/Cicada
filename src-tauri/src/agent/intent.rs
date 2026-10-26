@@ -14,6 +14,7 @@ pub(super) const INSTRUCTIONS: &str = r#"
 - 查询完成后用 intent_resolve(result=answered) 记录 query 意图。查证当前状态已符合要求时，可用 result=unchanged 记录无需重复写入的 write 意图；必须给出证据说明。跨模式不能处理的要求用 ask_clarify 说明如何切换，不要静默跳过。
 - task_query/project_query/recur_query 返回的当前对象才可用于写入。历史内容和历史编号仅供指代理解，不能直接当作写入依据。项目查询中 nodes 包含上下文，matchedIds 才是直接命中项。
 - 每个 Markdown 列表项、标题层次、日期、提醒、备注和条件都要保留。title 使用纯文本；详细说明、清单、链接放入 note 并保留 Markdown。连续动作中的对象和目的不能随意拆开，例如“联系崔所长进行调度对接”是一个节点。
+- “今日新增并已完成：事项”是记录一件已经办完的事，优先 task_add(done=true)，也可新增后用其 $ 引用 task_set_done。冒号后的“表的修改和报名”等是完整事项名称，不是修改数据库任务的指令。先用完整原句声明 write 意图，日期和“已完成”不能遗漏；普通“今日新增：事项”只新增待办。
 - 有遗漏或匹配歧义时先补齐工具调用或 ask_clarify。全部写入会统一提交；不要在工具成功前声称已经执行。回复使用名称和项目路径，不向用户报内部 id 或 $ 引用。
 - “今日”“遗留”“之后”分别用 task_query(scope=today/legacy/upcoming)，它们都是未完成任务分区；遗留的计划日期严格早于业务今天，不含今天。用户已明确集合且查询数量相符时直接处理该集合，删除确认由程序负责，不要再让用户从全部未完成任务中选择。
 - 查询回复使用任务的 display_label（标题、计划日期及提醒时间），节点使用项目路径。不能写“第4条”“编号6”等内部定位。实体有歧义时 ask_clarify 必须带被追问的原 intent_id，并用 entity_options.targets（kind=task/node、id=当前查询标识），由程序生成可读选项；该选择只限定对应意图，不能改绑为其它意图或影响独立要求。普通 options 只用于日期等非实体问题。
@@ -377,6 +378,89 @@ fn missing_source(items: &[IntentItem], source: &str) -> String {
         .collect()
 }
 
+/// 对明确的单条“新增并完成”录入核对最终计划，不依赖模型将复合动作标为 handled。
+/// 只识别这个无歧义的录入形式；自由表达、多行 Markdown 仍使用完整意图协议。
+pub(super) fn task_record_mismatch(
+    source: &str,
+    plan: &[crate::service::changes::Change],
+    today: &str,
+) -> Option<String> {
+    use crate::service::changes::{Change, TaskRef};
+
+    let source = source.trim();
+    if source.contains(['\n', '\r']) {
+        return None;
+    }
+    let (prefix, title) = source.split_once('：').or_else(|| source.split_once(':'))?;
+    if !matches!(
+        prefix.trim(),
+        "今日新增并已完成" | "今天新增并已完成" | "今日新增并完成" | "今天新增并完成"
+    ) {
+        return None;
+    }
+    let title = title.trim();
+    // 标题字段是纯文本，整段 Markdown 强调/行内代码不能成为期待标题的一部分。
+    let title = ["**", "__", "`"]
+        .iter()
+        .find_map(|marker| title.strip_prefix(*marker)?.strip_suffix(*marker))
+        .unwrap_or(title)
+        .trim();
+    let title = super::tools::plain_title(title.to_string()).ok()?;
+    // 带分项或备注/时间等后续子句时交给完整意图协议，不能强塞进标题。
+    if title.is_empty() || title.contains(['；', ';', '、', '，', ',', '：', ':']) {
+        return None;
+    }
+
+    let mismatch = || {
+        Some(format!(
+            "本轮要求新增并完成一条事项「{title}」，计划日期为 {today}。请保留完整事项名称；可 task_add(done=true)，或 task_add 后对新建引用 task_set_done(done=true)，不能仅新增未完成、改动已有任务或拆掉名称中的动作。当前未执行改动。"
+        ))
+    };
+    let mut recorded: Option<(&str, &str, bool)> = None;
+    for change in plan {
+        match change {
+            Change::TaskAdd {
+                title,
+                planned_date,
+                ..
+            } if recorded.is_none() => {
+                recorded = Some((title, planned_date, false));
+            }
+            Change::TaskSetDone {
+                task: TaskRef::Temp(reference),
+                done,
+            } if reference == "$1" && recorded.is_some() => {
+                recorded.as_mut().unwrap().2 = *done;
+            }
+            Change::TaskUpdate {
+                task: TaskRef::Temp(reference),
+                title,
+                planned_date,
+                ..
+            } if reference == "$1" && recorded.is_some() => {
+                let task = recorded.as_mut().unwrap();
+                if let Some(title) = title {
+                    task.0 = title;
+                }
+                if let Some(date) = planned_date {
+                    task.1 = date;
+                }
+            }
+            _ => return mismatch(),
+        }
+    }
+    match recorded {
+        Some((actual_title, date, true)) if actual_title.trim() == title.as_str() && date == today => None,
+        Some((actual_title, date, false)) if actual_title.trim() == title.as_str() && date == today => Some(
+            "本轮要求新增并完成；新事项已计入计划，但尚未标记完成。请仅对本轮新建引用 $1 调用 task_set_done(done=true)，不要重复 task_add。当前未执行改动。".into(),
+        ),
+        Some(_) => Some(format!(
+            "本轮要求新增并完成一条事项。请用 task_update 修改本轮新建引用 $1，完整标题为「{title}」、计划日期为 {today}，并保证 task_set_done(done=true)；不要重复 task_add，也不要改动已有任务。当前未执行改动。"
+        )),
+        _ => mismatch(),
+    }
+}
+
 impl ReadScope {
     pub(super) fn row(&self, kind: &str, id: i64) -> Option<&Value> {
         self.rows.get(&format!("{kind}:{id}"))
@@ -531,6 +615,86 @@ impl ReadScope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 明确新增完成核对完整标题日期及最终状态() {
+        use crate::service::changes::{Change, TaskRef};
+
+        let title = "第二届“AI+煤矿安全”应用场景创新大赛表的修改和报名";
+        let source = format!("今日新增并已完成：{title}");
+        let add = |title: &str, date: &str| Change::TaskAdd {
+            title: title.into(),
+            planned_date: date.into(),
+            due_at: None,
+            remind_at: None,
+            note: None,
+        };
+        let done = |done| Change::TaskSetDone {
+            task: TaskRef::Temp("$1".into()),
+            done,
+        };
+        let valid = vec![add(title, "2026-10-26"), done(true)];
+        assert!(task_record_mismatch(&source, &valid, "2026-10-26").is_none());
+        let emphasized = "今日新增并已完成：**比赛表修改**";
+        assert!(
+            task_record_mismatch(
+                emphasized,
+                &[add("比赛表修改", "2026-10-26"), done(true)],
+                "2026-10-26"
+            )
+            .is_none()
+        );
+        assert!(
+            task_record_mismatch(emphasized, &[add("比赛表修改", "2026-10-26")], "2026-10-26")
+                .is_some()
+        );
+        for plan in [
+            vec![],
+            vec![add(title, "2026-10-26")],
+            vec![add("修改比赛表", "2026-10-26"), done(true)],
+            vec![add(title, "2026-10-25"), done(true)],
+            vec![add(title, "2026-10-26"), done(true), done(false)],
+            vec![Change::TaskSetDone {
+                task: TaskRef::Id(1),
+                done: true,
+            }],
+            vec![
+                add("修改比赛表", "2026-10-26"),
+                add("报名", "2026-10-26"),
+                done(true),
+            ],
+        ] {
+            assert!(task_record_mismatch(&source, &plan, "2026-10-26").is_some());
+        }
+        assert!(task_record_mismatch("今日新增：比赛表的修改和报名", &[], "2026-10-26").is_none());
+        assert!(
+            task_record_mismatch(
+                "新增并已完成：昨天交周报",
+                &[add("交周报", "2026-10-25"), done(true)],
+                "2026-10-26"
+            )
+            .is_none()
+        );
+        assert!(
+            task_record_mismatch(
+                "今日新增并已完成：会议材料，备注：交给小王",
+                &[],
+                "2026-10-26"
+            )
+            .is_none()
+        );
+        // 校验完整动作不能取代原文覆盖：遗漏前缀的清单依然拒绝。
+        let mut check = IntentChecklist::default();
+        assert!(
+            check
+                .declare(
+                    Some(&json!({"items":[{"id":"a","excerpt":title,"kind":"write"}]})),
+                    &source,
+                    0
+                )
+                .is_err()
+        );
+    }
 
     #[test]
     fn 定位表达不误伤真实任务名称() {

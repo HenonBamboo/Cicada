@@ -81,6 +81,41 @@ pub fn cancel_pending(
     r
 }
 
+/// 实时停止独立于确认取消，也不等待正在执行的模型或数据维护写锁。
+#[tauri::command]
+pub fn stop_input(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request_ids: Vec<String>,
+) -> AppResult<agent::run_control::StopState> {
+    use agent::run_control::StopState;
+    if request_ids.is_empty() || request_ids.len() > 2 {
+        return Err(crate::error::AppError::Invalid("待停止的输入无效".into()));
+    }
+    let ids = request_ids
+        .iter()
+        .map(|id| {
+            uuid::Uuid::parse_str(id)
+                .map(|id| id.to_string())
+                .map_err(|_| crate::error::AppError::Invalid("待停止的输入无效".into()))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+    for id in &ids {
+        let active = state.agent_runs.stop(id);
+        if active != StopState::Finished {
+            return Ok(active);
+        }
+    }
+    let _maintenance = state
+        .maintenance
+        .try_read()
+        .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
+    agent_ctx!(ctx, app, state);
+    let result = agent::stop_running(&ctx, &ids);
+    inbox_changed(&app);
+    result
+}
+
 #[tauri::command]
 pub fn list_inbox(state: State<'_, AppState>) -> AppResult<Vec<InboxItem>> {
     let _maintenance = state
@@ -128,7 +163,7 @@ pub async fn retry_inbox(
 ) -> AppResult<AgentReply> {
     let _maintenance = state.maintenance.read().await;
     agent_ctx!(ctx, app, state);
-    let r = agent::process(&ctx, &request_id).await;
+    let r = agent::retry(&ctx, &request_id).await;
     inbox_changed(&app);
     r
 }

@@ -153,6 +153,7 @@ pub fn run() {
                 agent_cmd::submit_input,
                 agent_cmd::confirm_pending,
                 agent_cmd::cancel_pending,
+                agent_cmd::stop_input,
                 agent_cmd::list_inbox,
                 agent_cmd::list_input_history,
                 agent_cmd::retry_inbox,

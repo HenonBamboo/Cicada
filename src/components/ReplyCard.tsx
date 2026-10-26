@@ -23,10 +23,16 @@ export type ReplyView =
 export function ReplyCard({
   view,
   onClose,
+  onStop,
+  stopPending = false,
+  stopMessage,
   children,
 }: {
   view: ReplyView;
   onClose: () => void;
+  onStop?: () => void;
+  stopPending?: boolean;
+  stopMessage?: string | null;
   children?: ReactNode;
 }) {
   return (
@@ -54,7 +60,18 @@ export function ReplyCard({
             <Icon name="x" />
           </button>
         )}
+        {onStop && (
+          <button
+            type="button"
+            className="btn ghost reply-stop"
+            onClick={onStop}
+            disabled={stopPending}
+          >
+            {stopPending ? "正在停止" : "停止"}
+          </button>
+        )}
       </div>
+      {stopMessage && <div className="reply-stop-message">{stopMessage}</div>}
       {view.kind === "message" && (
         <div className="reply-body">
           {view.streaming ? (

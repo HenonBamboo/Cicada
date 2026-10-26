@@ -274,7 +274,7 @@ impl Model {
             Self::OpenAi(c) => c.chat(req, on_text, on_usage).await,
             Self::Claude(c) => c.chat(req, on_text, on_usage).await,
             #[cfg(test)]
-            Self::Scripted(m) => m.chat(req, on_text),
+            Self::Scripted(m) => m.chat(req, on_text).await,
         }
     }
 }

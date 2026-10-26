@@ -81,6 +81,7 @@ macro_rules! agent_ctx {
             .clone();
         let __app = $app.clone();
         let __app2 = $app.clone();
+        let __app3 = $app.clone();
         let __on_delta = move |id: &str, text: &str| {
             let _ = tauri::Emitter::emit_to(
                 &__app,
@@ -94,6 +95,9 @@ macro_rules! agent_ctx {
         };
         let __on_changes =
             move |c: &$crate::service::ChangeSet| $crate::commands::notify_changes(&__app2, c);
+        let __on_state = move || {
+            let _ = tauri::Emitter::emit(&__app3, $crate::commands::EVENT_INBOX_CHANGED, ());
+        };
         let $ctx = $crate::agent::Ctx {
             db: &$state.db,
             clock: $state.clock.as_ref(),
@@ -103,7 +107,9 @@ macro_rules! agent_ctx {
             secrets: $state.secrets.as_ref(),
             on_delta: &__on_delta,
             on_changes: &__on_changes,
+            on_state: &__on_state,
             usage_notify: Some(&$state.usage_changed),
+            runs: &$state.agent_runs,
             #[cfg(test)]
             test_model: None,
         };

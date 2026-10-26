@@ -58,7 +58,7 @@ export function Heatmap({
         </div>
         <div className="heat-grid" onMouseLeave={() => setTip(null)}>
           {grid.cells.map((c) =>
-            c.future ? (
+            c.outside ? (
               <span key={c.date} className="hc future" />
             ) : (
               <button
@@ -72,6 +72,11 @@ export function Heatmap({
                   const r = e.currentTarget.getBoundingClientRect();
                   setTip({ cell: c, x: r.left + r.width / 2, y: r.top });
                 }}
+                onFocus={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTip({ cell: c, x: r.left + r.width / 2, y: r.top });
+                }}
+                onBlur={() => setTip(null)}
                 onClick={() => onPickDay(c.date)}
               />
             ),

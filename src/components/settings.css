@@ -166,6 +166,37 @@
   color: var(--text-3);
   margin-top: 3px;
 }
+.usage-heat {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-2);
+}
+.usage-heat-heading {
+  margin-bottom: 12px;
+}
+.usage-heat-scroll {
+  display: flex;
+  flex-direction: column;
+  overflow-x: auto;
+  padding: 2px;
+  margin-bottom: 10px;
+}
+.usage-heat .heat-months,
+.usage-heat .heat-grid {
+  width: max-content;
+  margin-inline: auto;
+}
+.usage-heat > .heat-foot {
+  justify-content: center;
+}
+.hc.unknown {
+  box-shadow: inset 0 0 0 1px var(--text-3);
+}
+.usage-heat-tip {
+  line-height: 1.6;
+}
 .reply-actions {
   display: flex;
   align-items: center;

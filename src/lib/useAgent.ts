@@ -7,6 +7,7 @@ import {
   onAgentDelta,
   onInboxChanged,
   retryInbox,
+  stopInput,
   submitInput,
   undoLast,
 } from "./commands";
@@ -19,8 +20,12 @@ export function useAgent() {
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [showInbox, setShowInbox] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [stopPending, setStopPending] = useState(false);
+  const [stopMessage, setStopMessage] = useState<string | null>(null);
+  const [activeIds, setActiveIds] = useState<string[]>([]);
   const active = useRef<string[]>([]);
   const running = useRef(false);
+  const generation = useRef(0);
   const showError = useCallback((error: unknown) => {
     setResult(null);
     setReply({ kind: "message", status: "没有完成", lead: String(error), tone: "danger" });
@@ -47,8 +52,12 @@ export function useAgent() {
   const run = async (action: () => Promise<Reply>, requestId?: string, pendingId?: string) => {
     if (running.current) return false;
     running.current = true;
+    generation.current++;
     active.current = [requestId, pendingId].filter((id): id is string => !!id);
+    setActiveIds(active.current);
     setBusy(true);
+    setStopPending(false);
+    setStopMessage(null);
     setShowInbox(false);
     setResult(null);
     setReply({ kind: "thinking" });
@@ -72,8 +81,11 @@ export function useAgent() {
       return false;
     } finally {
       active.current = [];
+      setActiveIds([]);
       running.current = false;
       setBusy(false);
+      setStopPending(false);
+      setStopMessage(null);
       void refreshInbox();
     }
   };
@@ -83,6 +95,45 @@ export function useAgent() {
     inbox,
     showInbox,
     busy,
+    // 等后台确认输入已登记再提供停止，避免停止先于登记而漏掉这次输入。
+    canStop:
+      busy &&
+      inbox.some(
+        (item) =>
+          activeIds.includes(item.id) && (item.status === "processing" || item.status === "queued"),
+      ),
+    stopPending,
+    stopMessage,
+    stop: async () => {
+      if (!running.current || stopPending || !active.current.length) return;
+      const current = generation.current;
+      setStopPending(true);
+      setStopMessage("正在停止…");
+      try {
+        const state = await stopInput([...active.current]);
+        if (current !== generation.current || !running.current) return;
+        if (state === "committing") setStopMessage("正在保存结果，请稍候。");
+        else if (state === "finished") {
+          setStopPending(false);
+          setStopMessage("请求尚未开始或已经结束，请稍候查看结果。");
+        }
+      } catch (error) {
+        if (current !== generation.current || !running.current) return;
+        setStopPending(false);
+        setStopMessage(String(error));
+      }
+    },
+    stopInbox: async (id: string) => {
+      try {
+        const state = await stopInput([id]);
+        if (state === "committing") {
+          setReply({ kind: "message", status: "收件箱", lead: "正在保存结果，请稍候。" });
+        }
+        await refreshInbox();
+      } catch (error) {
+        showError(error);
+      }
+    },
     showError,
     setReply: (view: ReplyView | null) => {
       if (running.current) return;
@@ -91,6 +142,7 @@ export function useAgent() {
       setReply(view);
     },
     openInbox: () => {
+      if (running.current) return;
       setResult(null);
       setShowInbox(true);
       setReply({
