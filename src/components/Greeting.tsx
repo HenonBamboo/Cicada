@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { monthDay, period, weekdayName } from "../lib/dates";
 import type { TaskBoard } from "../lib/types";
 import { useUiCopy } from "../lib/useUiCopy";
+import { greetingParts, longestDelayedTask } from "../lib/greetingPresentation";
+import { markdownToPlainText } from "../lib/markdown";
 import { Icon } from "./Icon";
-
-/** 长期延期的天数阈值（docs/产品设计.md 5.3） */
-const STALE_DAYS = 7;
 
 /** 每分钟更新一次钟点，让"早上好 / 晚上好"随时间变化 */
 function useHour() {
@@ -22,7 +21,7 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
   const hour = useHour();
   const copy = useUiCopy();
   const left = tasks.today.length + tasks.legacy.length;
-  const stale = [...tasks.legacy, ...tasks.today].find((t) => t.delayDays > STALE_DAYS);
+  const stale = longestDelayedTask(tasks);
   const day = `${monthDay(date)} · ${weekdayName(date)}`;
   return (
     <>
@@ -31,7 +30,9 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
           <Icon name={hour >= 5 && hour < 18 ? "sun" : "moon"} />
         </span>
         {copy.greeting ? (
-          copy.greeting
+          greetingParts(copy.greeting, tasks).map((part, index) =>
+            part.emphasis ? <em key={index}>{part.text}</em> : part.text,
+          )
         ) : (
           <>
             {period(hour)}，
@@ -47,15 +48,12 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
       </h1>
       <p className="greeting-sub">
         {day}
-        {copy.nudge ? (
-          <>
-            {" "}
-            · <span className="nudge">{copy.nudge}</span>
-          </>
-        ) : stale ? (
+        {stale ? (
           <>
             {" · "}
-            <span className="nudge">「{stale.title}」还在清单里，要继续留着吗？</span>
+            <span className="nudge">
+              「{markdownToPlainText(stale.title)}」已延期 {stale.delayDays} 天，还要继续做吗？
+            </span>
           </>
         ) : null}
       </p>
