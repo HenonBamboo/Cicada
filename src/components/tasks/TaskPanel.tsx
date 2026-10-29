@@ -105,7 +105,6 @@ function TaskRow({
       ref={ref}
       {...rowMotion}
       className={`task${shown ? " is-done" : ""}${flash ? " flash" : ""}`}
-      data-item-details={itemDescription(t)}
     >
       <Check
         on={shown}
@@ -118,7 +117,9 @@ function TaskRow({
       />
       <div className="task-main">
         <div className="task-title">
-          <MarkdownInline text={t.title} />
+          <span data-item-details={itemDescription(t)}>
+            <MarkdownInline text={t.title} />
+          </span>
         </div>
         <Meta t={t} today={today} legacy={legacy} />
       </div>
@@ -129,18 +130,15 @@ function TaskRow({
 function UpcomingRow({ t, today, flash }: { t: TaskView; today: string; flash: boolean }) {
   const ref = useRevealOnFlash(flash);
   return (
-    <motion.div
-      ref={ref}
-      {...rowMotion}
-      className={`task upcoming${flash ? " flash" : ""}`}
-      data-item-details={itemDescription(t)}
-    >
+    <motion.div ref={ref} {...rowMotion} className={`task upcoming${flash ? " flash" : ""}`}>
       <span className="dot">
         <Icon name="clock" />
       </span>
       <div className="task-main">
         <div className="task-title">
-          <MarkdownInline text={t.title} />
+          <span data-item-details={itemDescription(t)}>
+            <MarkdownInline text={t.title} />
+          </span>
         </div>
         <Meta t={t} today={today} />
       </div>

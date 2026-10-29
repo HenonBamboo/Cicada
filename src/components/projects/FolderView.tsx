@@ -21,10 +21,7 @@ function Row({
   const pr = n.progress;
   return (
     <div>
-      <div
-        className={`prow l${n.depth}${n.done ? " done" : ""}${isFlash(n.id) ? " flash" : ""}`}
-        data-item-details={itemDescription(n)}
-      >
+      <div className={`prow l${n.depth}${n.done ? " done" : ""}${isFlash(n.id) ? " flash" : ""}`}>
         {hasKids ? (
           <button
             type="button"
@@ -40,7 +37,9 @@ function Row({
         )}
         <Check on={n.done} readonly />
         <span className="t">
-          <MarkdownInline text={n.title} />
+          <span data-item-details={itemDescription(n)}>
+            <MarkdownInline text={n.title} />
+          </span>
         </span>
         {pr && (
           <span className="prog">
@@ -52,7 +51,7 @@ function Row({
         )}
       </div>
       {n.dueAt && (
-        <div className={`project-detail l${n.depth}`} data-item-details={itemDescription(n)}>
+        <div className={`project-detail l${n.depth}`}>
           <span className="chip amber">
             <Icon name="flag" />
             截止 {nodeDeadline(n.dueAt)}

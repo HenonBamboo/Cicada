@@ -37,13 +37,12 @@ const COLORS: [StickyColor, string][] = [
 function ProjectTree({ node }: { node: ProjectNode }) {
   return (
     <>
-      <div
-        className={`st-node l${node.depth}${node.done ? " done" : ""}`}
-        data-item-details={itemDescription(node)}
-      >
+      <div className={`st-node l${node.depth}${node.done ? " done" : ""}`}>
         <span className="dot" />
         <span className="t">
-          <MarkdownInline text={node.title} />
+          <span data-item-details={itemDescription(node)}>
+            <MarkdownInline text={node.title} />
+          </span>
         </span>
         {node.dueAt && <span className="st-node-due">{nodeDeadline(node.dueAt)}</span>}
         {node.progress && (
@@ -68,10 +67,7 @@ function Task({
   flash: boolean;
 }) {
   return (
-    <div
-      className={`st-task${task.done ? " is-done" : ""}${flash ? " flash" : ""}`}
-      data-item-details={itemDescription(task)}
-    >
+    <div className={`st-task${task.done ? " is-done" : ""}${flash ? " flash" : ""}`}>
       <Check
         on={task.done}
         label={`${task.done ? "取消完成" : "完成"}「${markdownToPlainText(task.title)}」`}
@@ -79,7 +75,9 @@ function Task({
       />
       <div>
         <span className="t">
-          <MarkdownInline text={task.title} />
+          <span data-item-details={itemDescription(task)}>
+            <MarkdownInline text={task.title} />
+          </span>
         </span>
         {!task.done && task.delayDays > 0 ? (
           <span className="meta warn">已延期 {task.delayDays} 天</span>
@@ -208,16 +206,11 @@ export function StickyWindow() {
           if (!(event.target as HTMLElement).closest("button")) void act(openMain);
         }}
       >
-        <span
-          className="st-title"
-          data-item-details={
-            state?.kind === "project" && board?.project ? itemDescription(board.project) : undefined
-          }
-        >
+        <span className="st-title">
           {state?.kind === "project" ? (
-            <>
+            <span data-item-details={board?.project ? itemDescription(board.project) : undefined}>
               项目 · <MarkdownInline text={board?.project?.title ?? "项目"} />
-            </>
+            </span>
           ) : board ? (
             `今日 · ${monthDay(board.businessDate)} · 剩 ${openTasks.length} 件`
           ) : (

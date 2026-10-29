@@ -18,10 +18,11 @@ function Box({ data }: NodeProps<BoxNode>) {
       <Handle type="target" position={Position.Left} isConnectable={false} />
       <span
         className={`tbox${root ? " root" : ""}${n.done && !root ? " done" : ""}${flash ? " flash" : ""}`}
-        data-item-details={itemDescription(n)}
       >
         {n.done && !root && <Icon name="check" />}
-        <MarkdownInline text={n.title} />
+        <span data-item-details={itemDescription(n)}>
+          <MarkdownInline text={n.title} />
+        </span>
         {n.dueAt && <span className="node-due">{nodeDeadline(n.dueAt)}</span>}
         {pr && (
           <span className="p">
