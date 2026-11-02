@@ -35,13 +35,12 @@ export function Greeting({ date, tasks }: { date: string; tasks: TaskBoard }) {
           )
         ) : (
           <>
-            {period(hour)}，
             {left ? (
               <>
-                还有 <em>{left}</em> 件事，咱们一件件来。
+                还有 <em>{left}</em> 件事。
               </>
             ) : (
-              "今天的待办清单很清爽。"
+              `${period(hour)}，想法放这儿。`
             )}
           </>
         )}
