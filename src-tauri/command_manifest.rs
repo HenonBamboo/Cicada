@@ -55,6 +55,7 @@ pub const COMMANDS: &[&str] = &[
     "open_main",
     "show_quick_capture",
     "hide_quick_capture",
+    "resize_quick_capture",
     "submit_capture",
 ];
 pub const STICKY: &[&str] = &[
@@ -73,7 +74,14 @@ pub const QUICK: &[&str] = &[
     "list_input_history",
     "get_ui_copy",
     "get_desktop_bootstrap",
-    "submit_capture",
+    "submit_input",
+    "confirm_pending",
+    "cancel_pending",
+    "stop_input",
+    "list_inbox",
+    "retry_inbox",
+    "discard_inbox",
+    "resize_quick_capture",
     "hide_quick_capture",
     "open_main",
 ];
@@ -111,18 +119,29 @@ mod tests {
                 "save_model_settings",
                 "restore_backup",
                 "create_backup",
-                "confirm_pending",
                 "undo_last",
-                "submit_input",
                 "set_task_done",
                 "create_sticky",
             ] {
                 assert!(!allowed(label, command), "{label} must reject {command}");
                 assert!(allowed("main", command));
             }
-            assert!(allowed(label, "submit_capture"));
+            assert_eq!(allowed(label, "submit_capture"), label == "sticky-1");
         }
         assert!(!allowed("quick", "get_sticky_board"));
+        for command in [
+            "submit_input",
+            "confirm_pending",
+            "cancel_pending",
+            "stop_input",
+            "list_inbox",
+            "retry_inbox",
+            "discard_inbox",
+            "resize_quick_capture",
+        ] {
+            assert!(allowed("quick", command));
+            assert!(!allowed("sticky-1", command));
+        }
         assert!(!allowed("quick", "set_sticky_task_done"));
         assert!(!allowed("sticky-invalid", "submit_capture"));
         assert!(allowed("sticky-1", "set_sticky_task_done"));

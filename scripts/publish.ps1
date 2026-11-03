@@ -41,6 +41,18 @@ try {
 } finally {
     Remove-Item -LiteralPath $keyFile, $signatureFile -Force
 }
+$feedPath = Join-Path $root 'updates/stable.json'
+function Assert-UpdateFeed([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf) -or (Get-Item -LiteralPath $Path).Length -gt (96 * 1024)) { throw 'The signed update feed is missing or too large. Run package.ps1 before committing the release.' }
+    $feed = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ((Compare-Object @('manifestBase64', 'schemaVersion', 'signature') @($feed.PSObject.Properties.Name | Sort-Object) -CaseSensitive) -or
+        -not ($feed.schemaVersion -is [int] -or $feed.schemaVersion -is [long]) -or $feed.schemaVersion -ne 1 -or
+        $feed.manifestBase64 -isnot [string] -or $feed.signature -isnot [string]) { throw 'Invalid update feed schema.' }
+    $expectedManifest = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $artifacts 'latest.json')))
+    $expectedSignature = (Get-Content -LiteralPath (Join-Path $artifacts 'latest.json.sig') -Raw -Encoding UTF8).Trim()
+    if ($feed.manifestBase64 -cne $expectedManifest -or $feed.signature -cne $expectedSignature) { throw 'Update feed does not match the verified release manifest and signature.' }
+}
+Assert-UpdateFeed $feedPath
 if ([string]::IsNullOrWhiteSpace($env:GITCODE_TOKEN)) { throw 'Set GITCODE_TOKEN in the publishing process environment; it is never embedded in the application.' }
 $notes = Get-Content -LiteralPath $NotesFile -Raw -Encoding UTF8
 $dirty = & git -C $root status --porcelain
@@ -81,15 +93,15 @@ function Invoke-GitCode([string]$Method, [string]$Path, [object]$Body = $null) {
 }
 # Check the token before either remote is changed.
 $null = Invoke-GitCode 'Get' ''
+# 先上传标签，使发行版可引用同一提交；附件验证完成前不推进 main，旧更新入口继续可用。
 foreach ($remote in @('origin', 'gitcode')) {
-    & git -C $root push $remote 'HEAD:main' "refs/tags/$tag"
+    & git -C $root push $remote "refs/tags/$tag"
     if ($LASTEXITCODE -ne 0) { throw "Push to $remote failed; no force push was attempted." }
-    $published = @(& git -C $root ls-remote $remote 'refs/heads/main' "refs/tags/$tag" "refs/tags/$tag^{}")
+    $published = @(& git -C $root ls-remote $remote "refs/tags/$tag" "refs/tags/$tag^{}")
     if ($LASTEXITCODE -ne 0) { throw "Remote ref query failed: $remote" }
-    $mainRef = @($published | Where-Object { $_ -match '\s+refs/heads/main$' })
     $tagRef = @($published | Where-Object { $_ -match ('\s+refs/tags/' + [regex]::Escape($tag) + '\^\{\}$') })
     if ($tagRef.Count -eq 0) { $tagRef = @($published | Where-Object { $_ -match ('\s+refs/tags/' + [regex]::Escape($tag) + '$') }) }
-    if ($mainRef.Count -ne 1 -or $tagRef.Count -ne 1 -or ($mainRef[0] -split '\s+')[0] -cne $head -or ($tagRef[0] -split '\s+')[0] -cne $head) { throw "Remote main/tag commit verification failed: $remote" }
+    if ($tagRef.Count -ne 1 -or ($tagRef[0] -split '\s+')[0] -cne $head) { throw "Remote tag commit verification failed: $remote" }
 }
 
 $nativePreference = $ErrorActionPreference
@@ -150,11 +162,19 @@ try {
         if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath (Join-Path $artifacts $name) -Algorithm SHA256).Hash) { throw "GitCode checksum verification failed: $name" }
         Remove-Item -LiteralPath $download -Force
     }
-    $latest = Invoke-RestMethod -Uri "$api/releases/latest?type=latest"
-    if ($latest.tag_name -cne $tag) { throw 'GitCode latest release does not point to the newly published version.' }
+    foreach ($remote in @('origin', 'gitcode')) {
+        & git -C $root push $remote 'HEAD:main'
+        if ($LASTEXITCODE -ne 0) { throw "Main publication failed: $remote; verified assets were retained for retry." }
+        $publishedMain = @(& git -C $root ls-remote $remote 'refs/heads/main')
+        if ($LASTEXITCODE -ne 0 -or $publishedMain.Count -ne 1 -or ($publishedMain[0] -split '\s+')[0] -cne $head) { throw "Remote main commit verification failed: $remote" }
+    }
+    # 与客户端相同的匿名入口；不调用共享匿名 Releases/latest API，不携带平台 Token。
+    $publicFeed = Join-Path $verification 'stable.json'
+    try { Invoke-WebRequest -Uri "$api/raw/updates/stable.json?ref=main" -UserAgent "Cicada/$version" -MaximumRedirection 5 -OutFile $publicFeed | Out-Null } catch { throw 'Public update feed download failed; release assets were retained for retry.' }
+    Assert-UpdateFeed $publicFeed
     Write-Output "Published and verified $tag at the same commit and SHA-256 assets on GitHub and GitCode."
 } finally {
-    foreach ($name in $assets) {
+    foreach ($name in @($assets) + @('stable.json')) {
         $download = Join-Path $verification $name
         if (Test-Path -LiteralPath $download -PathType Leaf) { Remove-Item -LiteralPath $download -Force }
     }

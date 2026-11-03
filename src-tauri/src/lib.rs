@@ -196,6 +196,7 @@ pub fn run() {
                 desktop_cmd::open_main,
                 desktop_cmd::show_quick_capture,
                 desktop_cmd::hide_quick_capture,
+                desktop_cmd::resize_quick_capture,
                 desktop_cmd::submit_capture,
             ];
             handler(invoke)

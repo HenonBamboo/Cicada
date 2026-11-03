@@ -190,6 +190,40 @@ pub fn hide_quick(app: &AppHandle) -> AppResult<()> {
     Ok(())
 }
 
+/// 回复在输入条下方展开；空间不足时仅平移到当前屏幕工作区内。
+pub fn resize_quick(win: &WebviewWindow, height: f64) -> AppResult<f64> {
+    if !height.is_finite() {
+        return Err(window_error("快速记录窗口高度无效"));
+    }
+    let scale = win.scale_factor().map_err(window_error)?;
+    let monitor = win.current_monitor().map_err(window_error)?;
+    let max_height = monitor
+        .as_ref()
+        .map(|m| (m.work_area().size.height as f64 / scale).max(132.0))
+        .unwrap_or(580.0)
+        .min(580.0);
+    let height = height.ceil().clamp(132.0, max_height);
+    win.set_size(LogicalSize::new(640.0, height))
+        .map_err(window_error)?;
+    if let Some(monitor) = monitor {
+        let area = monitor.work_area();
+        let position = win.outer_position().map_err(window_error)?;
+        let size = win.outer_size().map_err(window_error)?;
+        let max_x =
+            (area.position.x + area.size.width as i32 - size.width as i32).max(area.position.x);
+        let max_y =
+            (area.position.y + area.size.height as i32 - size.height as i32).max(area.position.y);
+        let target = PhysicalPosition::new(
+            position.x.clamp(area.position.x, max_x),
+            position.y.clamp(area.position.y, max_y),
+        );
+        if target != position {
+            win.set_position(target).map_err(window_error)?;
+        }
+    }
+    Ok(height)
+}
+
 pub fn restore_stickies(app: &AppHandle) -> AppResult<()> {
     app.state::<WindowState>().1.store(false, Ordering::Relaxed);
     let state = app.state::<AppState>();

@@ -5,6 +5,7 @@ import {
   discardInbox,
   listInbox,
   onAgentDelta,
+  onCaptureReply,
   onInboxChanged,
   retryInbox,
   stopInput,
@@ -13,6 +14,7 @@ import {
 } from "./commands";
 import type { InboxItem, Mode, Reply } from "./types";
 import type { ReplyView } from "../components/ReplyCard";
+import { isInboxRequest, needsInboxAttention } from "./inbox";
 
 export function useAgent() {
   const [reply, setReply] = useState<ReplyView | null>(null);
@@ -26,7 +28,25 @@ export function useAgent() {
   const active = useRef<string[]>([]);
   const running = useRef(false);
   const generation = useRef(0);
+  const visibleRequest = useRef<string | null>(null);
+  const displayResult = useCallback((next: Reply) => {
+    visibleRequest.current = next.requestId;
+    setResult(next);
+    setReply({
+      kind: "message",
+      status: next.status ?? undefined,
+      lead: next.lead,
+      tone: next.kind === "error" ? "danger" : undefined,
+      items: next.items.map((item) => ({
+        icon: item.danger ? "minus" : "check",
+        text: item.text,
+        danger: item.danger,
+      })),
+    });
+  }, []);
   const showError = useCallback((error: unknown) => {
+    visibleRequest.current = null;
+    setShowInbox(false);
     setResult(null);
     setReply({ kind: "message", status: "没有完成", lead: String(error), tone: "danger" });
   }, []);
@@ -34,6 +54,9 @@ export function useAgent() {
   useEffect(() => {
     void refreshInbox();
     const off = onInboxChanged(() => void refreshInbox());
+    const replyOff = onCaptureReply((next) => {
+      if (!running.current && visibleRequest.current === next.requestId) displayResult(next);
+    });
     const deltaOff = onAgentDelta((delta) => {
       if (!active.current.includes(delta.requestId)) return;
       setReply((previous) => ({
@@ -46,9 +69,10 @@ export function useAgent() {
     });
     return () => {
       void off.then((f) => f());
+      void replyOff.then((f) => f());
       void deltaOff.then((f) => f());
     };
-  }, [refreshInbox]);
+  }, [refreshInbox, displayResult]);
   const run = async (action: () => Promise<Reply>, requestId?: string, pendingId?: string) => {
     if (running.current) return false;
     running.current = true;
@@ -59,22 +83,12 @@ export function useAgent() {
     setStopPending(false);
     setStopMessage(null);
     setShowInbox(false);
+    visibleRequest.current = null;
     setResult(null);
     setReply({ kind: "thinking" });
     try {
       const next = await action();
-      setResult(next);
-      setReply({
-        kind: "message",
-        status: next.status ?? undefined,
-        lead: next.lead,
-        tone: next.kind === "error" ? "danger" : undefined,
-        items: next.items.map((item) => ({
-          icon: item.danger ? "minus" : "check",
-          text: item.text,
-          danger: item.danger,
-        })),
-      });
+      displayResult(next);
       return true;
     } catch (error) {
       showError(error);
@@ -89,10 +103,30 @@ export function useAgent() {
       void refreshInbox();
     }
   };
+  const attentionInbox = inbox.filter(needsInboxAttention);
+  const openInbox = () => {
+    if (running.current) return;
+    visibleRequest.current = null;
+    setResult(null);
+    setShowInbox(true);
+    setReply({
+      kind: "message",
+      status: "收件箱",
+      lead: attentionInbox.length ? "这些输入需要你处理。" : "暂时没有需要处理的输入。",
+    });
+    void refreshInbox();
+  };
   return {
-    reply,
+    reply: showInbox
+      ? ({
+          kind: "message",
+          status: "收件箱",
+          lead: attentionInbox.length ? "这些输入需要你处理。" : "暂时没有需要处理的输入。",
+        } satisfies ReplyView)
+      : reply,
     result,
     inbox,
+    attentionInbox,
     showInbox,
     busy,
     // 等后台确认输入已登记再提供停止，避免停止先于登记而漏掉这次输入。
@@ -137,21 +171,24 @@ export function useAgent() {
     showError,
     setReply: (view: ReplyView | null) => {
       if (running.current) return;
+      visibleRequest.current = null;
       setResult(null);
       setShowInbox(false);
       setReply(view);
     },
-    openInbox: () => {
-      if (running.current) return;
-      setResult(null);
-      setShowInbox(true);
-      setReply({
-        kind: "message",
-        status: "收件箱",
-        lead: inbox.length ? "这些输入还在等待处理。" : "收件箱已清空。",
-      });
-    },
+    openInbox,
     submit: (text: string, mode: Mode, images: string[], selectionToken?: string) => {
+      if (
+        !running.current &&
+        !images.length &&
+        !selectionToken &&
+        result?.kind !== "clarify" &&
+        result?.kind !== "confirm" &&
+        isInboxRequest(text)
+      ) {
+        openInbox();
+        return Promise.resolve(true);
+      }
       const id = crypto.randomUUID();
       return run(
         () =>

@@ -32,6 +32,8 @@ import { useBoard } from "../../lib/useBoard";
 import { useAppState } from "../../theme/useAppState";
 import { useAgent } from "../../lib/useAgent";
 import { useInputNavigation } from "../../lib/useInputNavigation";
+import { InboxEntry } from "../../components/InboxEntry";
+import { ReplyActions } from "../../components/ReplyActions";
 import { InboxList } from "../../components/InboxList";
 import { Settings } from "../../components/Settings";
 import { Icon } from "../../components/Icon";
@@ -369,15 +371,11 @@ export function MainWindow() {
                 />
               )}
 
-              {agent.inbox.length > 0 && (
-                <button
-                  className="btn ghost inbox-link"
-                  disabled={operationBusy}
-                  onClick={agent.openInbox}
-                >
-                  收件箱 {agent.inbox.length} 条
-                </button>
-              )}
+              <InboxEntry
+                count={agent.attentionInbox.length}
+                busy={operationBusy}
+                onOpen={agent.openInbox}
+              />
 
               {err && !reply && (
                 <ReplyCard
@@ -425,7 +423,7 @@ export function MainWindow() {
                 >
                   {agent.showInbox && (
                     <InboxList
-                      items={agent.inbox}
+                      items={agent.attentionInbox}
                       busy={operationBusy}
                       onRetry={(item) => {
                         setMode(item.mode);
@@ -436,68 +434,15 @@ export function MainWindow() {
                     />
                   )}
                   {agent.result && (
-                    <div className="reply-actions">
-                      {agent.result.kind === "confirm" && (
-                        <>
-                          <button
-                            className="btn primary"
-                            disabled={operationBusy}
-                            onClick={() => void agent.confirm()}
-                          >
-                            确认
-                          </button>
-                          <button
-                            className="btn"
-                            disabled={operationBusy}
-                            onClick={() => void agent.cancel()}
-                          >
-                            算了
-                          </button>
-                        </>
-                      )}
-                      {agent.result.kind === "done" && (
-                        <button
-                          className="btn ghost"
-                          disabled={operationBusy}
-                          onClick={() => void agent.undo()}
-                        >
-                          撤销
-                        </button>
-                      )}
-                      {agent.result.kind === "unconfigured" && (
-                        <button
-                          className="btn"
-                          disabled={updating}
-                          onClick={() => setSettings(true)}
-                        >
-                          前往设置
-                        </button>
-                      )}
-                      {agent.result.kind === "clarify" &&
-                        agent.result.entityOptions?.length > 0 &&
-                        agent.result.entityOptions.map((option) => (
-                          <button
-                            key={option.value}
-                            className="btn"
-                            disabled={operationBusy}
-                            onClick={() => void agent.submit(option.label, mode, [], option.value)}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      {agent.result.kind === "clarify" &&
-                        !agent.result.entityOptions?.length &&
-                        agent.result.options.map((option) => (
-                          <button
-                            key={option}
-                            className="btn"
-                            disabled={operationBusy}
-                            onClick={() => void submit(option, [])}
-                          >
-                            {option}
-                          </button>
-                        ))}
-                    </div>
+                    <ReplyActions
+                      result={agent.result}
+                      busy={operationBusy}
+                      onConfirm={() => void agent.confirm()}
+                      onCancel={() => void agent.cancel()}
+                      onSubmit={(text, token) => void agent.submit(text, mode, [], token)}
+                      onUndo={() => void agent.undo()}
+                      onSettings={() => setSettings(true)}
+                    />
                   )}
                 </ReplyCard>
               )}

@@ -74,6 +74,9 @@ pub(crate) struct Delta<'a> {
 #[macro_export]
 macro_rules! agent_ctx {
     ($ctx:ident, $app:expr, $state:expr) => {
+        $crate::agent_ctx!($ctx, $app, $state, "main");
+    };
+    ($ctx:ident, $app:expr, $state:expr, $target:expr) => {
         let __config = $state
             .config
             .lock()
@@ -82,10 +85,11 @@ macro_rules! agent_ctx {
         let __app = $app.clone();
         let __app2 = $app.clone();
         let __app3 = $app.clone();
+        let __target = ($target).to_string();
         let __on_delta = move |id: &str, text: &str| {
             let _ = tauri::Emitter::emit_to(
                 &__app,
-                "main",
+                __target.as_str(),
                 $crate::commands::EVENT_AGENT_DELTA,
                 $crate::commands::Delta {
                     request_id: id,

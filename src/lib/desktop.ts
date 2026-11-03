@@ -31,6 +31,7 @@ export const onStickyChanged = (handler: () => void) => listen("sticky-changed",
 export const closeSticky = () => invoke<void>("close_sticky");
 export const openMain = () => invoke<void>("open_main");
 export const hideQuick = () => invoke<void>("hide_quick_capture");
+export const resizeQuick = (height: number) => invoke<number>("resize_quick_capture", { height });
 export const showQuick = () => invoke<void>("show_quick_capture");
 export const createSticky = (kind: "today" | "project", nodeId?: number, hideMain = false) =>
   invoke<StickyState>("create_sticky", { kind, nodeId, hideMain });

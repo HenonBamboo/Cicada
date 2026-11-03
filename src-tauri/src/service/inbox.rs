@@ -430,7 +430,7 @@ impl Service<'_> {
 
     pub fn inbox_ready(&self) -> AppResult<Vec<String>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id FROM inbox WHERE status = 'queued' AND ((status_reason IS NULL AND source IN ('sticky','quick')) OR status_reason = 'unconfigured'
+            "SELECT id FROM inbox WHERE status = 'queued' AND ((status_reason IS NULL AND source = 'sticky') OR status_reason = 'unconfigured'
              OR (status_reason = 'offline' AND next_attempt_at <= ?1)) ORDER BY received_at, id",
         )?;
         Ok(stmt

@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, State, WebviewWindow};
 use super::{EVENT_INBOX_CHANGED, with_service};
 use crate::agent::{self, AgentReply, Input, Mode};
 use crate::agent_ctx;
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use crate::service::inbox::InboxItem;
 use crate::state::AppState;
 
@@ -13,10 +13,41 @@ fn inbox_changed(app: &AppHandle) {
     let _ = app.emit(EVENT_INBOX_CHANGED, ());
 }
 
-/// 输入框提交（主窗口）
+fn conversation_source(label: &str) -> AppResult<&'static str> {
+    match label {
+        "main" => Ok("main"),
+        "quick" => Ok("quick"),
+        _ => Err(AppError::Invalid("该窗口不能处理对话".into())),
+    }
+}
+
+fn ensure_source_access(caller: &str, source: &str) -> AppResult<()> {
+    if conversation_source(caller)? == "main" || source == "quick" {
+        Ok(())
+    } else {
+        Err(AppError::Invalid("快速记录只能处理本入口的输入".into()))
+    }
+}
+
+/// 快速窗口不得借请求 ID 读取、续答或修改主窗口 / 便利贴的请求。
+fn ensure_request_access(state: &AppState, caller: &str, id: &str) -> AppResult<()> {
+    conversation_source(caller)?;
+    if caller == "main" {
+        return Ok(());
+    }
+    with_service(state, |s| {
+        if s.inbox_exists(id)? {
+            ensure_source_access(caller, &s.inbox_get(id)?.source)?;
+        }
+        Ok(())
+    })
+}
+
+/// 输入框提交：来源与流式回复目标取自宿主窗口。
 #[tauri::command]
 pub async fn submit_input(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     text: String,
     mode: Mode,
@@ -26,9 +57,16 @@ pub async fn submit_input(
     selection_token: Option<String>,
 ) -> AppResult<AgentReply> {
     let _maintenance = state.maintenance.read().await;
-    agent_ctx!(ctx, app, state);
+    let source = conversation_source(window.label())?;
+    if let Some(id) = request_id.as_deref() {
+        ensure_request_access(&state, source, id)?;
+    }
+    if let Some(id) = reply_to.as_deref() {
+        ensure_request_access(&state, source, id)?;
+    }
+    agent_ctx!(ctx, app, state, source);
     let input = Input {
-        source: "main",
+        source,
         mode,
         text,
         images,
@@ -55,11 +93,13 @@ pub async fn submit_input(
 #[tauri::command]
 pub async fn confirm_pending(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     request_id: String,
 ) -> AppResult<AgentReply> {
     let _maintenance = state.maintenance.read().await;
-    agent_ctx!(ctx, app, state);
+    ensure_request_access(&state, window.label(), &request_id)?;
+    agent_ctx!(ctx, app, state, window.label().to_owned());
     let r = agent::confirm(&ctx, &request_id).await;
     inbox_changed(&app);
     r
@@ -68,6 +108,7 @@ pub async fn confirm_pending(
 #[tauri::command]
 pub fn cancel_pending(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     request_id: String,
 ) -> AppResult<AgentReply> {
@@ -75,7 +116,8 @@ pub fn cancel_pending(
         .maintenance
         .try_read()
         .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
-    agent_ctx!(ctx, app, state);
+    ensure_request_access(&state, window.label(), &request_id)?;
+    agent_ctx!(ctx, app, state, window.label().to_owned());
     let r = agent::cancel(&ctx, &request_id);
     inbox_changed(&app);
     r
@@ -85,6 +127,7 @@ pub fn cancel_pending(
 #[tauri::command]
 pub fn stop_input(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     request_ids: Vec<String>,
 ) -> AppResult<agent::run_control::StopState> {
@@ -100,6 +143,10 @@ pub fn stop_input(
                 .map_err(|_| crate::error::AppError::Invalid("待停止的输入无效".into()))
         })
         .collect::<AppResult<Vec<_>>>()?;
+    // Validate every supplied reference before stopping any one of them.
+    for id in &ids {
+        ensure_request_access(&state, window.label(), id)?;
+    }
     for id in &ids {
         let active = state.agent_runs.stop(id);
         if active != StopState::Finished {
@@ -117,12 +164,19 @@ pub fn stop_input(
 }
 
 #[tauri::command]
-pub fn list_inbox(state: State<'_, AppState>) -> AppResult<Vec<InboxItem>> {
+pub fn list_inbox(window: WebviewWindow, state: State<'_, AppState>) -> AppResult<Vec<InboxItem>> {
+    let source = conversation_source(window.label())?;
     let _maintenance = state
         .maintenance
         .try_read()
         .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
-    with_service(&state, |s| s.inbox_open())
+    with_service(&state, |s| {
+        let mut items = s.inbox_open()?;
+        if source == "quick" {
+            items.retain(|item| item.source == source);
+        }
+        Ok(items)
+    })
 }
 
 /// 输入历史按实际调用窗口校验来源，子窗口不能读取主窗口的历史。
@@ -158,11 +212,13 @@ pub fn list_input_history(
 #[tauri::command]
 pub async fn retry_inbox(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     request_id: String,
 ) -> AppResult<AgentReply> {
     let _maintenance = state.maintenance.read().await;
-    agent_ctx!(ctx, app, state);
+    ensure_request_access(&state, window.label(), &request_id)?;
+    agent_ctx!(ctx, app, state, window.label().to_owned());
     let r = agent::retry(&ctx, &request_id).await;
     inbox_changed(&app);
     r
@@ -172,6 +228,7 @@ pub async fn retry_inbox(
 #[tauri::command]
 pub fn discard_inbox(
     app: AppHandle,
+    window: WebviewWindow,
     state: State<'_, AppState>,
     request_id: String,
 ) -> AppResult<()> {
@@ -179,8 +236,27 @@ pub fn discard_inbox(
         .maintenance
         .try_read()
         .map_err(|_| crate::error::AppError::Invalid("正在恢复备份，请稍后再试".into()))?;
-    agent_ctx!(ctx, app, state);
+    ensure_request_access(&state, window.label(), &request_id)?;
+    agent_ctx!(ctx, app, state, window.label().to_owned());
     agent::discard(&ctx, &request_id)?;
     inbox_changed(&app);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 快速对话只允许本来源_主窗口可以接续所有入口() {
+        assert_eq!(conversation_source("quick").unwrap(), "quick");
+        assert!(conversation_source("sticky-1").is_err());
+        for source in ["main", "quick", "sticky"] {
+            assert!(ensure_source_access("main", source).is_ok());
+            assert_eq!(
+                ensure_source_access("quick", source).is_ok(),
+                source == "quick"
+            );
+        }
+    }
 }

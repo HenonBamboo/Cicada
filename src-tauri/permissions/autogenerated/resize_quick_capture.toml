@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resize-quick-capture"
+description = "Enables the resize_quick_capture command without any pre-configured scope."
+commands.allow = ["resize_quick_capture"]
+
+[[permission]]
+identifier = "deny-resize-quick-capture"
+description = "Denies the resize_quick_capture command without any pre-configured scope."
+commands.deny = ["resize_quick_capture"]

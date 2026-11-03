@@ -80,6 +80,8 @@ export const listInputHistory = (mode: Mode, source: InputSource) =>
 export const retryInbox = (requestId: string) => invoke<Reply>("retry_inbox", { requestId });
 export const discardInbox = (requestId: string) => invoke<void>("discard_inbox", { requestId });
 export const onInboxChanged = (handler: () => void) => listen("inbox-changed", handler);
+export const onCaptureReply = (handler: (reply: Reply) => void) =>
+  listen<Reply>("capture-reply", (event) => handler(event.payload));
 export const onAgentDelta = (handler: (delta: { requestId: string; text: string }) => void) =>
   listen<{ requestId: string; text: string }>("agent-delta", (e) => handler(e.payload));
 export const getModelSettings = () => invoke<ModelSettings>("get_model_settings");

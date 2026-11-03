@@ -197,41 +197,10 @@
 .usage-heat-tip {
   line-height: 1.6;
 }
-.reply-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 12px;
-}
 .settings-row .reply-actions {
   margin: 0;
 }
-.inbox-link {
-  align-self: flex-start;
-  margin-top: 4px;
-  font-size: 0.82rem;
-}
-.inbox-item {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--border);
-}
-.inbox-item:last-child {
-  border: 0;
-}
-.inbox-content {
-  flex: 1;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.inbox-content small {
-  display: block;
-  color: var(--text-3);
-  font-size: 0.8rem;
-}
+
 .reply-list li.del {
   color: var(--text-2);
   text-decoration: line-through;

@@ -221,7 +221,16 @@ pub fn hide_quick_capture(app: AppHandle) -> AppResult<()> {
     windows::hide_quick(&app)
 }
 
-/// 只登记输入，网络处理交给已有后台队列。失败保留输入，成功后快速窗口即隐藏。
+/// 只调整调用者自己的快速记录窗口，不暴露通用窗口几何权限。
+#[tauri::command]
+pub fn resize_quick_capture(window: WebviewWindow, height: f64) -> AppResult<f64> {
+    if window.label() != windows::QUICK_WINDOW {
+        return Err(AppError::Invalid("该窗口不能调整快速记录窗口".into()));
+    }
+    windows::resize_quick(&window, height)
+}
+
+/// 便利贴只登记输入，网络处理交给已有后台队列。
 #[tauri::command]
 pub fn submit_capture(
     app: AppHandle,
@@ -237,18 +246,12 @@ pub fn submit_capture(
     let id = uuid::Uuid::parse_str(&request_id)
         .map_err(|_| AppError::Invalid("请求编号无效".into()))?
         .to_string();
-    let (source, target_project) = if window.label() == "quick" {
-        ("quick", None)
+    let source = "sticky";
+    let sticky = with_service(&state, |s| s.sticky_get(sticky_id(window.label())?))?;
+    let target_project = if matches!(mode, Mode::Project) {
+        sticky.node_id
     } else {
-        let sticky = with_service(&state, |s| s.sticky_get(sticky_id(window.label())?))?;
-        (
-            "sticky",
-            if matches!(mode, Mode::Project) {
-                sticky.node_id
-            } else {
-                None
-            },
-        )
+        None
     };
     let mode = match mode {
         Mode::Task => "task",
@@ -275,9 +278,6 @@ pub fn submit_capture(
         }
         Ok(())
     })?;
-    if source == "quick" {
-        windows::hide_quick(&app)?;
-    }
     let _ = app.emit_to("main", EVENT_INBOX_CHANGED, ());
     state.wake.notify_one();
     Ok(id)

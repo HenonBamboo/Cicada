@@ -1,3 +1,5 @@
 dist
 src-tauri
 package-lock.json
+# Generated signed update envelope
+updates/stable.json

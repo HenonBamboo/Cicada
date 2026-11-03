@@ -407,6 +407,55 @@ async fn 说取消或别的话都不执行() {
 }
 
 #[tokio::test]
+async fn 快速记录直接回答且不接管主窗口的待确认() {
+    let env = Env::new();
+    let c = clock("2026-10-17 10:00:00");
+    let m = scripted(vec![Step::Say("今天没有待办。")]);
+    let ctx = env.ctx(&c, Some(&m));
+    ctx.svc(|s| {
+        s.inbox_register("main-pending", "main", "task", "删除任务", &[])?;
+        s.inbox_set(
+            "main-pending",
+            Status::Awaiting,
+            Some("confirm"),
+            None,
+            None,
+        )?;
+        s.pending_save(NewPending {
+            request_id: "main-pending",
+            kind: "confirm",
+            plan: "[]",
+            versions: "[]",
+            context: None,
+            preview: None,
+            expires_at: "2026-10-17T10:10:00",
+        })
+    })
+    .unwrap();
+    let reply = submit(
+        &ctx,
+        Input {
+            source: "quick",
+            ..input("今天有哪些事？")
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.kind, ReplyKind::Info);
+    assert_eq!(reply.lead, "今天没有待办。");
+    assert_eq!(
+        ctx.svc(|s| s.inbox_get(&reply.request_id)).unwrap().source,
+        "quick"
+    );
+    assert!(
+        ctx.svc(|s| s.pending_get("main-pending"))
+            .unwrap()
+            .is_some()
+    );
+    assert_eq!(env.count("SELECT COUNT(*) FROM op_log"), 0);
+}
+
+#[tokio::test]
 async fn 快速记录入队后在主窗口续答且不重复写入() {
     let env = Env::new();
     let c = clock("2026-10-17 10:00:00");
@@ -435,6 +484,9 @@ async fn 快速记录入队后在主窗口续答且不重复写入() {
     ctx.svc(|s| s.inbox_register(&id, "quick", "task", "记录一下", &[]))
         .unwrap();
     assert_eq!(env.count("SELECT COUNT(*) FROM tasks"), 0);
+    // 新版快捷记录由前台直接处理；旧版残留在启动恢复后仍能进入后台队列。
+    assert!(!ctx.svc(|s| s.inbox_ready()).unwrap().contains(&id));
+    ctx.svc(|s| s.inbox_recover()).unwrap();
     assert!(ctx.svc(|s| s.inbox_ready()).unwrap().contains(&id));
     assert_eq!(process(&ctx, &id).await.unwrap().kind, ReplyKind::Clarify);
     assert_eq!(

@@ -49,6 +49,10 @@ async fn run_once(app: &AppHandle) -> AppResult<()> {
     }
     for id in ids {
         if let Ok(reply) = agent::process(&ctx, &id).await {
+            // 离线 / 未配置恢复后的结果补回原快捷卡片；只发事件，不显示或聚焦窗口。
+            if with_service(&state, |s| s.inbox_get(&id)).is_ok_and(|item| item.source == "quick") {
+                let _ = app.emit_to("quick", "capture-reply", &reply);
+            }
             notify(app, &reply);
         }
     }

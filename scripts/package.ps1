@@ -85,6 +85,21 @@ try {
         "$hash  $name"
     }
     [IO.File]::WriteAllText((Join-Path $output 'SHA256SUMS'), ($checksums -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+    # 公共更新入口是一个原子提交的 Git 文件；不把 EXE 或私钥放进仓库。
+    # 清单签名不包含提交哈希：先构建/签名生成 feed，再提交源码和 feed，不需要循环重建。
+    $feedDirectory = Join-Path $appRoot 'updates'
+    $feedPath = Join-Path $feedDirectory 'stable.json'
+    foreach ($path in @($feedDirectory, $feedPath)) {
+        if ((Test-Path -LiteralPath $path) -and ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'The update feed path must not be a reparse point.' }
+    }
+    New-Item -ItemType Directory -Path $feedDirectory -Force | Out-Null
+    $feed = [ordered]@{
+        schemaVersion = 1
+        manifestBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($manifestPath))
+        signature = (Get-Content -LiteralPath (Join-Path $output 'latest.json.sig') -Raw -Encoding UTF8).Trim()
+    }
+    [IO.File]::WriteAllText($feedPath, ($feed | ConvertTo-Json -Compress) + "`n", [Text.UTF8Encoding]::new($false))
+    Write-Host 'Include updates/stable.json in the release source commit after packaging.'
     Get-ChildItem -LiteralPath $output -File | Select-Object Name, Length
     Write-Host "Release directory: $output"
 } finally {

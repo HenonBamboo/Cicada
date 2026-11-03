@@ -18,8 +18,20 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::error::{AppError, AppResult};
 
 const API: &str = "https://api.gitcode.com/api/v5/repos/HenonBamboo_YYJ/Cicada";
+// 单个 Git 文件同时携带原始清单和签名，不依赖共享匿名配额的 releases/latest 查询。
+const FEED_URL: &str =
+    "https://api.gitcode.com/api/v5/repos/HenonBamboo_YYJ/Cicada/raw/updates/stable.json?ref=main";
 const MAX_EXE_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: usize = 64 * 1024;
+const MAX_FEED_BYTES: usize = 96 * 1024;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateFeed {
+    schema_version: u32,
+    manifest_base64: String,
+    signature: String,
+}
 
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -95,6 +107,19 @@ fn http_error(_: reqwest::Error) -> AppError {
     invalid("更新服务暂时不可用，请稍后再试")
 }
 
+fn response_error(status: reqwest::StatusCode, resource: &str) -> AppError {
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return invalid("更新服务暂时限流，请稍后手动重试（HTTP 429）");
+    }
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return invalid(&format!("{resource}尚未发布或已移除（HTTP 404）"));
+    }
+    invalid(&format!(
+        "{resource}获取失败（HTTP {}），请稍后重试",
+        status.as_u16()
+    ))
+}
+
 fn client() -> AppResult<reqwest::Client> {
     // 附件可能跳转到 GitCode 对象存储；只接受 HTTPS 跳转，不携带任何用户凭据。
     reqwest::Client::builder()
@@ -115,17 +140,17 @@ fn asset_url(tag: &str, name: &str) -> String {
 async fn bounded_bytes(client: &reqwest::Client, url: &str, limit: usize) -> AppResult<Vec<u8>> {
     let response = client.get(url).send().await.map_err(http_error)?;
     if !response.status().is_success() {
-        return Err(invalid("更新文件暂时不可用"));
+        return Err(response_error(response.status(), "更新清单"));
     }
     if response.content_length().is_some_and(|n| n > limit as u64) {
-        return Err(invalid("更新文件大小异常"));
+        return Err(invalid("更新清单大小异常"));
     }
     let mut stream = response.bytes_stream();
     let mut output = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(http_error)?;
         if output.len().saturating_add(chunk.len()) > limit {
-            return Err(invalid("更新文件大小异常"));
+            return Err(invalid("更新清单大小异常"));
         }
         output.extend_from_slice(&chunk);
     }
@@ -142,7 +167,8 @@ fn verify_manifest_with_key(bytes: &[u8], signature: &str, key: &[u8]) -> AppRes
     UnparsedPublicKey::new(&ED25519, key)
         .verify(bytes, &signature)
         .map_err(|_| invalid("更新签名校验失败，已保留当前版本"))?;
-    let manifest: Manifest = serde_json::from_slice(bytes)?;
+    let manifest: Manifest =
+        serde_json::from_slice(bytes).map_err(|_| invalid("更新清单格式异常"))?;
     let version =
         semver::Version::parse(&manifest.version).map_err(|_| invalid("更新版本格式无效"))?;
     if manifest.schema_version != 1
@@ -199,62 +225,46 @@ pub(super) fn verify_download(path: &Path, manifest: &Manifest) -> AppResult<()>
     Ok(())
 }
 
-async fn check() -> AppResult<Option<Candidate>> {
-    #[derive(Deserialize)]
-    struct Release {
-        tag_name: String,
-        #[serde(default)]
-        prerelease: bool,
+fn candidate_from_feed(
+    feed_bytes: &[u8],
+    current: &str,
+    public_key: &[u8],
+) -> AppResult<Option<Candidate>> {
+    if feed_bytes.len() > MAX_FEED_BYTES {
+        return Err(invalid("更新清单大小异常"));
     }
-    let client = client()?;
-    let release = bounded_bytes(
-        &client,
-        &format!("{API}/releases/latest?type=latest"),
-        512 * 1024,
-    )
-    .await?;
-    let release: Release = serde_json::from_slice(&release)?;
-    let Some(version) = release
-        .tag_name
-        .strip_prefix('v')
-        .and_then(|v| semver::Version::parse(v).ok())
-    else {
-        return Err(invalid("更新版本格式无效"));
-    };
-    let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))
-        .map_err(|_| invalid("当前版本格式无效"))?;
-    if release.prerelease
-        || !version.pre.is_empty()
-        || !version.build.is_empty()
-        || version <= current
+    let feed: UpdateFeed =
+        serde_json::from_slice(feed_bytes).map_err(|_| invalid("更新通道格式无效，请稍后重试"))?;
+    if feed.schema_version != 1
+        || feed.manifest_base64.len() > MAX_MANIFEST_BYTES.div_ceil(3) * 4
+        || feed.signature.len() != 88
     {
+        return Err(invalid("更新通道格式无效，请稍后重试"));
+    }
+    let bytes = STANDARD
+        .decode(feed.manifest_base64)
+        .map_err(|_| invalid("更新清单编码无效"))?;
+    // 版本和下载目标均来自验签后的原始字节，绝不重序列化清单再验签。
+    let manifest = verify_manifest_with_key(&bytes, &feed.signature, public_key)?;
+    let version =
+        semver::Version::parse(&manifest.version).map_err(|_| invalid("更新版本格式无效"))?;
+    let current = semver::Version::parse(current).map_err(|_| invalid("当前版本格式无效"))?;
+    if version <= current {
         return Ok(None);
-    }
-    if release.tag_name != format!("v{version}") {
-        return Err(invalid("更新标签格式无效"));
-    }
-    let bytes = bounded_bytes(
-        &client,
-        &asset_url(&release.tag_name, "latest.json"),
-        MAX_MANIFEST_BYTES,
-    )
-    .await?;
-    let signature = bounded_bytes(
-        &client,
-        &asset_url(&release.tag_name, "latest.json.sig"),
-        256,
-    )
-    .await?;
-    let signature = String::from_utf8(signature).map_err(|_| invalid("更新签名格式无效"))?;
-    let manifest = verify_manifest(&bytes, &signature)?;
-    if manifest.tag != release.tag_name {
-        return Err(invalid("更新清单与发布版本不一致"));
     }
     Ok(Some(Candidate {
         manifest,
         bytes,
-        signature,
+        signature: feed.signature,
     }))
+}
+
+async fn check() -> AppResult<Option<Candidate>> {
+    let bytes = bounded_bytes(&client()?, FEED_URL, MAX_FEED_BYTES).await?;
+    let public_key = STANDARD
+        .decode(include_str!("public-key.txt").trim())
+        .map_err(|_| invalid("更新公钥配置无效"))?;
+    candidate_from_feed(&bytes, env!("CARGO_PKG_VERSION"), &public_key)
 }
 
 /// setup 中调用；调试版不请求发布服务器。
@@ -390,12 +400,14 @@ pub async fn install(app: &AppHandle, state: &UpdateState) -> AppResult<()> {
             .send()
             .await
             .map_err(http_error)?;
-        if !response.status().is_success()
-            || response
-                .content_length()
-                .is_some_and(|n| n != candidate.manifest.size)
+        if !response.status().is_success() {
+            return Err(response_error(response.status(), "更新程序"));
+        }
+        if response
+            .content_length()
+            .is_some_and(|n| n != candidate.manifest.size)
         {
-            return Err(invalid("更新文件暂时不可用或大小异常"));
+            return Err(invalid("更新文件大小异常，已保留当前版本"));
         }
         let mut file = OpenOptions::new()
             .write(true)
@@ -479,6 +491,64 @@ mod tests {
         let escaped = serde_json::to_vec(&manifest).unwrap();
         let signature = STANDARD.encode(key.sign(&escaped).as_ref());
         assert!(verify_manifest_with_key(&escaped, &signature, key.public_key().as_ref()).is_err());
+    }
+
+    #[test]
+    fn signed_feed_preserves_manifest_bytes_and_requires_newer_verified_version() {
+        let (key, bytes, signature) = signed();
+        let mut feed = serde_json::json!({
+            "schemaVersion": 1,
+            "manifestBase64": STANDARD.encode(&bytes),
+            "signature": signature,
+        });
+        let raw = serde_json::to_vec(&feed).unwrap();
+        let public_key = key.public_key().as_ref();
+        let candidate = candidate_from_feed(&raw, "0.2.10", public_key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(candidate.bytes, bytes);
+        assert_eq!(candidate.manifest.version, "0.3.0");
+        assert!(
+            candidate_from_feed(&raw, "0.3.0", public_key)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            candidate_from_feed(&raw, "0.4.0", public_key)
+                .unwrap()
+                .is_none()
+        );
+
+        let mut altered_bytes = bytes.clone();
+        altered_bytes.push(b' ');
+        feed["manifestBase64"] = serde_json::json!(STANDARD.encode(altered_bytes));
+        let altered = serde_json::to_vec(&feed).unwrap();
+        assert!(candidate_from_feed(&altered, "0.2.10", public_key).is_err());
+        // 即使版本已经相同，也先验证签名，不把损坏/伪造清单说成“已是最新”。
+        assert!(candidate_from_feed(&altered, "0.3.0", public_key).is_err());
+        feed["manifestBase64"] = serde_json::json!(STANDARD.encode(&bytes));
+        feed["extra"] = serde_json::json!("ignored?");
+        assert!(
+            candidate_from_feed(&serde_json::to_vec(&feed).unwrap(), "0.2.10", public_key).is_err()
+        );
+        assert!(
+            candidate_from_feed(&vec![b' '; MAX_FEED_BYTES + 1], "0.2.10", public_key).is_err()
+        );
+    }
+
+    #[test]
+    fn update_http_errors_distinguish_rate_limit_missing_feed_and_exe() {
+        let limited =
+            response_error(reqwest::StatusCode::TOO_MANY_REQUESTS, "更新清单").to_string();
+        assert!(limited.contains("限流"));
+        assert!(limited.contains("HTTP 429"));
+        assert!(!limited.contains("校验失败"));
+        let missing = response_error(reqwest::StatusCode::NOT_FOUND, "更新清单").to_string();
+        assert!(missing.contains("更新清单尚未发布"));
+        assert!(missing.contains("HTTP 404"));
+        let denied = response_error(reqwest::StatusCode::FORBIDDEN, "更新程序").to_string();
+        assert!(denied.contains("更新程序获取失败"));
+        assert!(denied.contains("HTTP 403"));
     }
 
     #[test]

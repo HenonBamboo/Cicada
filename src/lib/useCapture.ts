@@ -4,7 +4,11 @@ import type { InputSource } from "./commands";
 import { useInputHistory } from "./useInputHistory";
 import type { Mode } from "./types";
 
-export function useCapture(source: Exclude<InputSource, "main">, initialMode: Mode = "task") {
+export function useCapture(
+  source: Exclude<InputSource, "main">,
+  initialMode: Mode = "task",
+  submit?: (text: string, mode: Mode, images: string[]) => Promise<boolean>,
+) {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<Mode>(initialMode);
   const history = useInputHistory(mode, source);
@@ -31,7 +35,11 @@ export function useCapture(source: Exclude<InputSource, "main">, initialMode: Mo
     setError(null);
     requestId.current ??= crypto.randomUUID();
     try {
-      await submitCapture(text, mode, images, requestId.current);
+      if (submit) {
+        if (!(await submit(text, mode, images))) return false;
+      } else {
+        await submitCapture(text, mode, images, requestId.current);
+      }
       history.reset();
       setText("");
       setImages([]);

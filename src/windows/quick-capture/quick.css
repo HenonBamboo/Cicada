@@ -3,6 +3,15 @@ html[data-window="quick"] body {
 }
 .capture {
   padding: 8px;
+  max-height: 100vh;
+  overflow: auto;
+}
+.capture .reply {
+  max-height: 380px;
+  animation: none;
+}
+.capture .reply-list {
+  animation: none;
 }
 .cap-box {
   display: flex;
