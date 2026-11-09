@@ -44,6 +44,10 @@ impl AppState {
         let paths = DataPaths::new(base, dev);
         paths.ensure()?;
         let config = AppConfig::load_or_create(&paths.config())?;
+        // 启动时收敛旧版本积累的备份，在生成迁移前备份之前完成清理。
+        let cleanup_warning = crate::backup::prune(&paths, None)
+            .err()
+            .map(|error| format!("旧备份清理失败，本次仍可继续使用：{error}"));
         crate::prompts::write_reference(&paths.prompts())?;
         let mut conn = db::open(&paths.db())?;
         db::migrate(&mut conn, |conn, _| {
@@ -72,7 +76,7 @@ impl AppState {
             usage_changed: tokio::sync::Notify::new(),
             agent_runs: crate::agent::run_control::RunControl::default(),
             maintenance: tokio::sync::RwLock::new(()),
-            desktop_error: Mutex::new(backup_warning),
+            desktop_error: Mutex::new(backup_warning.or(cleanup_warning)),
         })
     }
 

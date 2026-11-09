@@ -128,20 +128,27 @@ pub fn create(
         kind: kind.into(),
     };
     // 清理失败不否定已成功落盘的备份。
-    if let Ok(entries) = list(paths) {
-        for automatic in [true, false] {
-            let keep = if automatic { 30 } else { 10 };
-            let existing_to_keep = keep - usize::from((entry.kind == "auto") == automatic);
-            for old in entries
-                .iter()
-                .filter(|e| (e.kind == "auto") == automatic && e.name != entry.name)
-                .skip(existing_to_keep)
-            {
-                let _ = fs::remove_file(paths.backups().join(&old.name));
-            }
-        }
-    }
+    let _ = prune(paths, Some(&entry.name));
     Ok(entry)
+}
+
+/// 所有类型共用十份配额；时钟回拨时也保留本次刚生成的操作前备份。
+pub(crate) fn prune(paths: &DataPaths, protected: Option<&str>) -> AppResult<()> {
+    const KEEP: usize = 10;
+    let entries = list(paths)?;
+    let reserved = usize::from(
+        entries
+            .iter()
+            .any(|entry| Some(entry.name.as_str()) == protected),
+    );
+    for old in entries
+        .iter()
+        .filter(|entry| Some(entry.name.as_str()) != protected)
+        .skip(KEEP - reserved)
+    {
+        fs::remove_file(paths.backups().join(&old.name))?;
+    }
+    Ok(())
 }
 
 pub fn daily(
@@ -453,7 +460,7 @@ mod tests {
     use crate::config::ThemeChoice;
 
     #[test]
-    fn daily_backups_and_retention_are_independent() {
+    fn daily_backups_share_ten_slots_with_other_backups() {
         let temp = tempfile::tempdir().unwrap();
         let paths = DataPaths::new(temp.path(), true);
         paths.ensure().unwrap();
@@ -475,45 +482,49 @@ mod tests {
         }
         assert_eq!(list(&paths).unwrap().len(), 3);
 
-        // 超过保留数量后，两组独立保留；操作前备份与手动备份共用十份配额。
-        for day in 3..32 {
-            let clock = crate::clock::FixedClock(start + chrono::Duration::days(day));
-            daily(&paths, &conn, &config, &clock).unwrap();
-        }
+        // 自动、手动和操作前备份共用十份配额。
         for index in 0..12 {
             let clock = crate::clock::FixedClock(
                 start + chrono::Duration::days(32) + chrono::Duration::seconds(index),
             );
-            let kind = match index % 3 {
-                0 => "manual",
-                1 => "pre-migration",
+            let kind = match index % 4 {
+                0 => "auto",
+                1 => "manual",
+                2 => "pre-migration",
                 _ => "pre-restore",
             };
             create(&paths, &conn, &clock, kind).unwrap();
         }
         let entries = list(&paths).unwrap();
-        let automatic: Vec<_> = entries
-            .iter()
-            .filter(|entry| entry.kind == "auto")
-            .collect();
-        let other: Vec<_> = entries
-            .iter()
-            .filter(|entry| entry.kind != "auto")
-            .collect();
-        assert_eq!(automatic.len(), 30);
-        assert_eq!(other.len(), 10);
+        assert_eq!(entries.len(), 10);
         assert_eq!(
-            automatic.last().unwrap().created_at,
-            (start + chrono::Duration::days(2))
-                .format("%Y-%m-%dT%H:%M:%S")
-                .to_string()
-        );
-        assert_eq!(
-            other.last().unwrap().created_at,
+            entries.last().unwrap().created_at,
             (start + chrono::Duration::days(32) + chrono::Duration::seconds(2))
                 .format("%Y-%m-%dT%H:%M:%S")
                 .to_string()
         );
+
+        // 模拟旧版已积累的备份，不生成新备份也能收敛到十份。
+        for index in 0..3 {
+            fs::copy(
+                paths.backups().join(&entries.last().unwrap().name),
+                paths.backups().join(format!("legacy-{index}.zip")),
+            )
+            .unwrap();
+        }
+        let unrelated = paths.backups().join("unrelated.txt");
+        fs::write(&unrelated, "保留").unwrap();
+        assert_eq!(list(&paths).unwrap().len(), 13);
+        prune(&paths, None).unwrap();
+        assert_eq!(list(&paths).unwrap().len(), 10);
+        assert!(paths.backups().join(&entries[0].name).exists());
+        assert!(unrelated.exists());
+
+        // 时钟回拨后，本次操作前备份仍须留下，不能因日期旧而立即删除。
+        let rollback = crate::clock::FixedClock(start);
+        let protected = create(&paths, &conn, &rollback, "pre-import").unwrap();
+        assert_eq!(list(&paths).unwrap().len(), 10);
+        assert!(paths.backups().join(&protected.name).exists());
     }
 
     #[test]

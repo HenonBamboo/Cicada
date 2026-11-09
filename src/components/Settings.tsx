@@ -476,7 +476,7 @@ export function Settings({
               <DataExchange report={setMessage} onImported={load} />
               <Row
                 label="自动备份"
-                hint="每天备份一次，保留最近 30 份；手动和操作前备份保留最近 10 份。包含数据库、报告、配置和提示词，不含 API Key。"
+                hint="每天备份一次，所有备份合计保留最近 10 份。包含数据库、报告、配置和提示词，不含 API Key。"
               >
                 <button
                   className="btn"
