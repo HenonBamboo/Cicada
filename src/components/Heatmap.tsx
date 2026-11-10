@@ -3,14 +3,11 @@ import { monthDay } from "../lib/dates";
 import { buildHeatGrid, type HeatCell } from "../lib/heatmap";
 import type { HeatDay } from "../lib/types";
 import { Icon } from "./Icon";
-
-/** 提示框半宽的估计值，用于贴边时收回窗口内 */
-const TIP_HALF = 96;
+import { HeatmapTip } from "./HeatmapTip";
 
 interface Tip {
   cell: HeatCell;
-  x: number;
-  y: number;
+  anchor: HTMLElement;
 }
 
 /** 完成热力图（docs/产品设计.md 第 6 节）：悬停看数字，点击在回复区看当天清单 */
@@ -69,12 +66,10 @@ export function Heatmap({
                 data-l={c.level}
                 aria-label={`${monthDay(c.date)}：任务 ${c.tasks}，项目 ${c.nodes}`}
                 onMouseEnter={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setTip({ cell: c, x: r.left + r.width / 2, y: r.top });
+                  setTip({ cell: c, anchor: e.currentTarget });
                 }}
                 onFocus={(e) => {
-                  const r = e.currentTarget.getBoundingClientRect();
-                  setTip({ cell: c, x: r.left + r.width / 2, y: r.top });
+                  setTip({ cell: c, anchor: e.currentTarget });
                 }}
                 onBlur={() => setTip(null)}
                 onClick={() => onPickDay(c.date)}
@@ -84,18 +79,10 @@ export function Heatmap({
         </div>
       </div>
       {tip && (
-        <div
-          className="heat-tip popover"
-          style={{
-            // 今天在最右一列，提示框不能超出窗口
-            left: Math.min(Math.max(tip.x, TIP_HALF), window.innerWidth - TIP_HALF),
-            top: tip.y - 8,
-            transform: "translate(-50%, -100%)",
-          }}
-        >
+        <HeatmapTip anchor={tip.anchor} onDismiss={() => setTip(null)}>
           {monthDay(tip.cell.date)} · 任务 <span className="n">{tip.cell.tasks}</span> · 项目{" "}
           <span className="n">{tip.cell.nodes}</span>
-        </div>
+        </HeatmapTip>
       )}
     </div>
   );

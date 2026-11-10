@@ -406,7 +406,10 @@
   pointer-events: none;
   padding: 6px 10px;
   font-size: 0.8rem;
-  white-space: nowrap;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .heat-tip .n {
   font-family: var(--font-mono);

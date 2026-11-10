@@ -2,11 +2,12 @@ import { useMemo, useState } from "react";
 import type { UsageDay } from "../lib/commands";
 import { monthDay } from "../lib/dates";
 import { heatCalendar } from "../lib/heatmap";
+import { HeatmapTip } from "./HeatmapTip";
 
 const number = new Intl.NumberFormat("zh-CN");
 
 export function UsageHeatmap({ today, days }: { today: string; days: UsageDay[] }) {
-  const [tip, setTip] = useState<{ day: UsageDay; x: number; y: number } | null>(null);
+  const [tip, setTip] = useState<{ day: UsageDay; anchor: HTMLElement } | null>(null);
   const calendar = useMemo(() => heatCalendar(today), [today]);
   const byDate = useMemo(() => new Map(days.map((day) => [day.date, day])), [days]);
   const max = Math.max(
@@ -42,8 +43,7 @@ export function UsageHeatmap({ today, days }: { today: string; days: UsageDay[] 
             const level =
               day.totalTokens > 0 ? Math.max(1, Math.ceil((day.totalTokens / max) * 4)) : 0;
             const show = (element: HTMLElement) => {
-              const rect = element.getBoundingClientRect();
-              setTip({ day, x: rect.left + rect.width / 2, y: rect.top });
+              setTip({ day, anchor: element });
             };
             return (
               <button
@@ -70,15 +70,7 @@ export function UsageHeatmap({ today, days }: { today: string; days: UsageDay[] 
         多<span className="hc unknown" /> 含未知用量
       </div>
       {tip && (
-        <div
-          className="heat-tip popover usage-heat-tip"
-          role="tooltip"
-          style={{
-            left: Math.min(Math.max(tip.x, 125), window.innerWidth - 125),
-            top: tip.y - 8,
-            transform: "translate(-50%, -100%)",
-          }}
-        >
+        <HeatmapTip anchor={tip.anchor} className="usage-heat-tip" onDismiss={() => setTip(null)}>
           <div>
             {monthDay(tip.day.date)} · {number.format(tip.day.requests)} 次请求
           </div>
@@ -89,7 +81,7 @@ export function UsageHeatmap({ today, days }: { today: string; days: UsageDay[] 
           {tip.day.unknownRequests > 0 && (
             <div>{number.format(tip.day.unknownRequests)} 次用量未知，未计入合计</div>
           )}
-        </div>
+        </HeatmapTip>
       )}
     </div>
   );
